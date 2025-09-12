@@ -1,0 +1,8 @@
+id: chatgpt.science.explainer
+assistant: chatgpt
+category: science
+operators: [role_hdr, constraints, io_format, quality_bar]
+hparams: { temperature: 0.25, top_p: 0.9, max_tokens: 900 }
+guards: { max_temperature: 0.4 }
+examples: []
+

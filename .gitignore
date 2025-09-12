@@ -1,0 +1,41 @@
+# OS
+.DS_Store
+
+# Local databases and artifacts
+*.sqlite
+console.sqlite
+
+# Editors and tooling
+.vscode/
+.claude/
+.kiro/
+
+# Python
+.venv/
+venv/
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+
+# Node / JS
+node_modules/
+.pnp*
+.npmrc
+npm-debug.log*
+yarn-error.log*
+.next/
+dist/
+build/
+
+# Env files
+.env
+.env.*
+!.env.example
+
+# Nested repository to ignore
+context7/
+
+# Misc
+coverage/
+
