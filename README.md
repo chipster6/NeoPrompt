@@ -21,7 +21,7 @@ Frontend (React + Vite + Tailwind)
   ├─ History Panel (filters/search)
   └─ Settings (recipes viewer/hot-reload)
 
-Backend (FastAPI, Python 3.11)
+Backend (FastAPI, Python 3.12)
   ├─ /choose      -> select recipe, (optional) enhance input, build engineered prompt
   ├─ /feedback    -> record reward components + aggregate reward
   ├─ /history     -> list recent decisions (with/without text)
@@ -37,6 +37,14 @@ Storage (SQLite via SQLAlchemy)
 ```
 
 ## Development Setup
+
+Run the following once to install the pinned Python (3.12.10) and Node (22) versions:
+
+```bash
+mise install
+# if you see an "untrusted" warning, run:
+mise trust .mise.toml
+```
 
 ### Backend
 ```bash
