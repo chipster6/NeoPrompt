@@ -166,6 +166,21 @@ guards: { max_temperature: 0.4 }
 examples: []
 ```
 
+### Baseline coverage (v1)
+- Assistants: chatgpt, claude, gemini, deepseek
+- Categories: coding, science, psychology, law, politics
+- For every assistant×category pair, at least one baseline recipe exists (suffix `.baseline` where applicable) to prevent “No recipes available for the given assistant/category”.
+- Safety defaults:
+  - law: guards.max_temperature ≤ 0.3 (also capped at runtime by `apply_domain_caps`)
+  - psychology, politics: guards.max_temperature ≤ 0.35
+  - science, coding: guards.max_temperature ≤ 0.4
+
+Existing examples include:
+- `recipes/chatgpt.coding.basic.yaml`
+- `recipes/claude.coding.strict.yaml`
+- `recipes/chatgpt.science.explainer.yaml`
+…plus baseline files for all other assistant×category pairs.
+
 ---
 
 ## 6) Operators (Deterministic Building Blocks)

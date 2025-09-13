@@ -21,6 +21,19 @@ class FeedbackRequest(BaseModel):
     safety_flags: List[str] = Field(default_factory=list, description="Safety/quality concerns")
 
 
+class StatsItem(BaseModel):
+    assistant: str
+    category: str
+    recipe_id: str
+    mean_reward: float
+    count: int
+
+
+class StatsResponse(BaseModel):
+    epsilon: float
+    items: List[StatsItem]
+
+
 # Response schemas
 class ChooseResponse(BaseModel):
     decision_id: str = Field(..., description="Unique identifier for this decision")

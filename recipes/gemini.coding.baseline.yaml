@@ -1,0 +1,8 @@
+id: gemini.coding.baseline
+assistant: gemini
+category: coding
+operators: [role_hdr, constraints, io_format, quality_bar]
+hparams: { temperature: 0.2, top_p: 0.9, max_tokens: 1200 }
+guards: { max_temperature: 0.4 }
+examples: []
+

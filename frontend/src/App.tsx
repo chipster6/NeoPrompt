@@ -1,33 +1,66 @@
 import React, { useEffect, useMemo, useState } from 'react'
-import { apiChoose, apiFeedback, apiHistory, apiRecipes } from './lib/api'
+import { apiChoose, apiFeedback, apiRecipes } from './lib/api'
 import Console from './components/Console'
 import OutputPanel from './components/OutputPanel'
 import HistoryList from './components/HistoryList'
+import SettingsModal from './components/SettingsModal'
+import StatsPanel from './components/StatsPanel'
+import { useToast } from './components/ToastProvider'
 
 export default function App() {
+  const { showToast } = useToast()
   const [assistant, setAssistant] = useState('chatgpt')
   const [category, setCategory] = useState('coding')
   const [enhance, setEnhance] = useState(false)
+  const [forceJson, setForceJson] = useState(false)
   const [raw, setRaw] = useState('')
   const [result, setResult] = useState<any>(null)
   const [recipes, setRecipes] = useState<any[]>([])
   const [loading, setLoading] = useState(false)
+  const [settingsOpen, setSettingsOpen] = useState(false)
+  const [settingsOpen, setSettingsOpen] = useState(false)
+  const [storeText, setStoreText] = useState<boolean>(() => {
+    const v = localStorage.getItem('store_text')
+    return v === '1'
+  })
+  const [tokenCostPerK, setTokenCostPerK] = useState<number>(() => {
+    const v = localStorage.getItem('token_cost_per_k')
+    const n = v ? Number(v) : 0
+    return Number.isFinite(n) ? n : 0
+  })
 
   useEffect(() => {
-    apiRecipes().then((r) => setRecipes(r.recipes)).catch(() => setRecipes([]))
+    apiRecipes()
+      .then((r) => setRecipes(Array.isArray(r.recipes) ? r.recipes : []))
+      .catch(() => setRecipes([]))
   }, [])
 
+  useEffect(() => {
+    localStorage.setItem('store_text', storeText ? '1' : '0')
+  }, [storeText])
+
+  useEffect(() => {
+    localStorage.setItem('token_cost_per_k', String(tokenCostPerK || 0))
+  }, [tokenCostPerK])
+
   async function onGenerate() {
+    if (!raw.trim()) {
+      showToast('Enter some input first', 'error')
+      return
+    }
     setLoading(true)
     try {
       const res = await apiChoose({
         assistant,
         category,
         raw_input: raw,
-        options: { enhance, force_json: false },
-        context_features: {},
+        options: { enhance, force_json: forceJson },
+        context_features: { store_text: storeText },
       })
       setResult(res)
+      showToast('Prompt generated', 'success')
+    } catch (e: any) {
+      showToast(e?.message || 'Failed to generate', 'error')
     } finally {
       setLoading(false)
     }
@@ -35,12 +68,38 @@ export default function App() {
 
   async function onLike(like: boolean) {
     if (!result) return
-    await apiFeedback({
-      decision_id: result.decision_id,
-      reward_components: { user_like: like ? 1 : 0 },
-      reward: like ? 1 : 0,
-      safety_flags: [],
-    })
+    try {
+      await apiFeedback({
+        decision_id: result.decision_id,
+        reward_components: { user_like: like ? 1 : 0 },
+        reward: like ? 1 : 0,
+        safety_flags: [],
+      })
+      showToast(like ? 'Thanks for the thumbs up!' : 'Thanks for the feedback', 'success')
+    } catch (e: any) {
+      showToast('Feedback failed', 'error')
+    }
+  }
+
+  async function onCopy(text: string) {
+    try {
+      await navigator.clipboard.writeText(text)
+      showToast('Copied to clipboard', 'success')
+      if (result?.decision_id) {
+        try {
+          await apiFeedback({
+            decision_id: result.decision_id,
+            reward_components: { copied: 1 },
+            reward: 1,
+            safety_flags: [],
+          })
+        } catch {
+          // non-fatal
+        }
+      }
+    } catch {
+      showToast('Copy failed', 'error')
+    }
   }
 
   return (
@@ -63,15 +122,34 @@ export default function App() {
           <label className="flex items-center gap-2">
             <input type="checkbox" checked={enhance} onChange={(e) => setEnhance(e.target.checked)} /> Enhance
           </label>
+          <label className="flex items-center gap-2">
+            <input type="checkbox" checked={forceJson} onChange={(e) => setForceJson(e.target.checked)} /> Force JSON
+          </label>
+          <button onClick={() => setSettingsOpen(true)} className="bg-neutral-800 hover:bg-neutral-700 px-3 py-2 rounded">
+            Settings
+          </button>
+          <button onClick={() => setStatsOpen(true)} className="bg-neutral-800 hover:bg-neutral-700 px-3 py-2 rounded">
+            Stats
+          </button>
           <button onClick={onGenerate} className="ml-auto bg-green-700 hover:bg-green-600 px-4 py-2 rounded disabled:opacity-50" disabled={loading}>
             {loading ? 'Generating...' : 'Generate'}
           </button>
         </div>
 
-        <Console value={raw} onChange={setRaw} onSubmit={onGenerate} />
-        <OutputPanel result={result} onLike={onLike} />
-        <HistoryList />
+        <Console value={raw} onChange={setRaw} onSubmit={onGenerate} tokenCostPerK={tokenCostPerK} />
+        <OutputPanel result={result} onLike={onLike} onCopy={onCopy} tokenCostPerK={tokenCostPerK} />
+        <HistoryList defaultWithText={storeText} />
       </div>
+
+      <SettingsModal
+        open={settingsOpen}
+        onClose={() => setSettingsOpen(false)}
+        storeText={storeText}
+        onToggleStoreText={setStoreText}
+        tokenCostPerK={tokenCostPerK}
+        onUpdateTokenCostPerK={setTokenCostPerK}
+      />
+      <StatsPanel open={statsOpen} onClose={() => setStatsOpen(false)} />
     </div>
   )
 }

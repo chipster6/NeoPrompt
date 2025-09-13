@@ -1,6 +1,7 @@
 """Guardrails: domain caps, JSON validation, and text hygiene."""
 from __future__ import annotations
 import json
+import re
 from typing import Dict, Any, Tuple
 
 
@@ -14,17 +15,30 @@ def apply_domain_caps(category: str, hparams: Dict[str, Any]) -> Dict[str, Any]:
     return capped
 
 
+_INJECTION_PATTERNS = [
+    r"(?i)ignore (all|any|previous|earlier) instructions",
+    r"(?i)disregard (all|any|previous|earlier) instructions",
+    r"(?i)you are (now )?a (?:different|new) (?:assistant|model|persona)",
+    r"(?i)system prompt",
+    r"(?i)developer mode",
+    r"(?i)prompt injection",
+    r"(?i)jailbreak",
+    r"(?i)\bDAN\b",
+]
+
+
 def sanitize_text(text: str) -> str:
-    """Strip common prompt-injection phrases from enhancer output."""
-    banned = [
-        "ignore previous instructions",
-        "disregard earlier instructions",
-    ]
-    lowered = text
-    for b in banned:
-        lowered = lowered.replace(b, "")
-        lowered = lowered.replace(b.title(), "")
-    return lowered
+    """Strip common prompt-injection phrases and obfuscations from text.
+    This is a conservative hygiene step; it does not attempt to fully neutralize attacks.
+    """
+    cleaned = text
+    for pat in _INJECTION_PATTERNS:
+        cleaned = re.sub(pat, "", cleaned)
+    # Remove stray control fence attempts
+    cleaned = re.sub(r"```[a-zA-Z0-9_-]*\n?", "", cleaned)
+    # Collapse excessive whitespace
+    cleaned = re.sub(r"\n{3,}", "\n\n", cleaned)
+    return cleaned.strip()
 
 
 def validate_json_if_required(force_json: bool, content: str) -> Tuple[bool, str]:
@@ -46,4 +60,3 @@ def validate_json_if_required(force_json: bool, content: str) -> Tuple[bool, str
         except Exception:
             pass
         return False, content
-

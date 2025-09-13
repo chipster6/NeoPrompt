@@ -3,7 +3,7 @@ Computes mean rewards per recipe using past decisions and feedback.
 """
 from __future__ import annotations
 import random
-from typing import List, Tuple, Dict
+from typing import List, Tuple, Dict, Optional
 from sqlalchemy.orm import Session
 from sqlalchemy import func
 
@@ -23,6 +23,44 @@ def _fetch_recipe_stats(db: Session, assistant: str, category: str) -> Dict[str,
     for recipe_id, avg_reward, count in q.all():
         stats[recipe_id] = {"mean_reward": float(avg_reward or 0.0), "count": float(count or 0)}
     return stats
+
+
+def get_optimizer_stats(
+    db: Session,
+    assistant: Optional[str] = None,
+    category: Optional[str] = None,
+) -> List[Dict[str, object]]:
+    """Return list of stats rows across assistant/category/recipe.
+    Each row: {assistant, category, recipe_id, mean_reward, count}
+    Optionally filter by assistant/category.
+    """
+    q = (
+        db.query(
+            Decision.assistant,
+            Decision.category,
+            Decision.recipe_id,
+            func.avg(Feedback.reward),
+            func.count(Feedback.reward),
+        )
+        .join(Feedback, Feedback.decision_id == Decision.id)
+        .group_by(Decision.assistant, Decision.category, Decision.recipe_id)
+    )
+    if assistant:
+        q = q.filter(Decision.assistant == assistant)
+    if category:
+        q = q.filter(Decision.category == category)
+    rows = []
+    for a, c, rid, avg_reward, cnt in q.all():
+        rows.append(
+            {
+                "assistant": a,
+                "category": c,
+                "recipe_id": rid,
+                "mean_reward": float(avg_reward or 0.0),
+                "count": int(cnt or 0),
+            }
+        )
+    return rows
 
 
 def _last_n_rewards(db: Session, recipe_id: str, n: int = 3) -> List[float]:
@@ -58,10 +96,11 @@ def select_recipe(
     if not candidates:
         raise ValueError("No candidate recipes available")
 
+    original_candidates = list(candidates)
     candidates = _eligible(candidates, db)
     if not candidates:
-        # Fall back to all if safety filtered all out
-        candidates = candidates or candidates
+        # Fall back to original if safety filter removed all
+        candidates = original_candidates
 
     # Exploration
     if random.random() < epsilon:

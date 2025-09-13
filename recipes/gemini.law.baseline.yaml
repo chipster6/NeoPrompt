@@ -1,0 +1,8 @@
+id: gemini.law.baseline
+assistant: gemini
+category: law
+operators: [role_hdr, constraints, io_format, quality_bar]
+hparams: { temperature: 0.2, top_p: 0.85, max_tokens: 900 }
+guards: { max_temperature: 0.3 }
+examples: []
+

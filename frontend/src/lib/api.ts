@@ -47,3 +47,23 @@ export async function apiRecipes() {
   return res.json();
 }
 
+export async function apiStatsGet(params: { assistant?: string; category?: string } = {}) {
+  const url = new URL(`${API_BASE}/stats`);
+  Object.entries(params).forEach(([k, v]) => {
+    if (v !== undefined && v !== null) url.searchParams.set(k, String(v));
+  });
+  const res = await fetch(url.toString());
+  if (!res.ok) throw new Error('Stats fetch failed');
+  return res.json();
+}
+
+export async function apiStatsUpdate(payload: { epsilon?: number; reset?: boolean; assistant?: string; category?: string }) {
+  const res = await fetch(`${API_BASE}/stats`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(payload),
+  });
+  if (!res.ok) throw new Error('Stats update failed');
+  return res.json();
+}
+
