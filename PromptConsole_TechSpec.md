@@ -49,7 +49,7 @@ Frontend (React + Vite + Tailwind)
   ├─ History Panel (filters/search)
   └─ Settings (recipes viewer/hot-reload)
 
-Backend (FastAPI, Python 3.11)
+Backend (FastAPI, Python 3.12)
   ├─ /choose      -> select recipe, (optional) enhance input, build engineered prompt
   ├─ /feedback    -> record reward components + aggregate reward
   ├─ /history     -> list recent decisions (with/without text)
