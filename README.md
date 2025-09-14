@@ -67,6 +67,7 @@ npm run dev
 
 - The backend maintains an in-memory cache of the last-known-good recipes.
 - Editing YAML files under `recipes/` is picked up automatically via mtime checks.
+- A background task periodically reloads based on `RECIPES_RELOAD_INTERVAL_SECONDS` (default 5s).
 - You can force a synchronous reload with:
 
 ```bash
@@ -74,7 +75,7 @@ curl -s 'http://127.0.0.1:7070/recipes?reload=true' | jq
 ```
 
 - The `/recipes` endpoint returns both parsed recipes and validation errors/warnings with fields:
-  - `file_path`, `error`, `line_number` (when available), and `error_type` (`yaml_parse`, `schema_validation`, `semantic_validation`).
+  - `file_path`, `error`, `line_number` (when available), `error_type` (`yaml_parse`, `schema_validation`, `semantic_validation`), and `severity` (`error` or `warning`).
 - If no valid recipes are available, `/choose` responds with a structured 503:
 
 ```json

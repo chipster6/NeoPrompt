@@ -85,6 +85,7 @@ class RecipeValidationError(BaseModel):
     error: str
     line_number: Optional[int] = None
     error_type: Optional[str] = None
+    severity: Optional[str] = None  # 'error' | 'warning'
 
 
 class RecipesResponse(BaseModel):
