@@ -41,6 +41,10 @@ def _parse_yaml(path: str) -> Tuple[Optional[dict], Optional[RecipeError]]:
         return None, RecipeError(file_path=path, error=str(e), error_type="io_error", line_number=None)
 
 
+# Validation mode: strict excludes semantic issues for critical categories
+VALIDATION_STRICT = os.getenv("VALIDATION_STRICT", "0") == "1"
+_STRICT_CRITICAL_CATEGORIES = {"law"}
+
 def load_recipes(recipes_dir: str) -> Tuple[List[RecipeModel], List[RecipeError]]:
     """Load all YAML recipe files from directory.
     Returns (valid_recipes, errors). Invalid files are excluded from results.
@@ -59,10 +63,12 @@ def load_recipes(recipes_dir: str) -> Tuple[List[RecipeModel], List[RecipeError]
         except ValidationError as e:
             errors.append(RecipeError(file_path=path, error=str(e), error_type="schema_validation", line_number=None))
             continue
-        # Semantic warnings (do not exclude recipe)
+        # Semantic warnings (do not exclude recipe unless strict+critical category)
         sem_issues = validate_recipe(recipe)
         for msg in sem_issues:
             errors.append(RecipeError(file_path=path, error=msg, error_type="semantic_validation", line_number=None))
+        if VALIDATION_STRICT and sem_issues and recipe.category in _STRICT_CRITICAL_CATEGORIES:
+            continue
         valid.append(recipe)
     return valid, errors
 
@@ -81,6 +87,51 @@ def validate_recipe(recipe: RecipeModel) -> List[str]:
         except Exception:
             issues.append("guards.max_temperature must be a number")
     return issues
+
+
+def filter_recipes(recipes: List[RecipeModel], assistant: str, category: str) -> Tuple[List[RecipeModel], str, List[str]]:
+    """Return candidates with explicit fallback tiers and notes.
+
+    Tiers (first non-empty wins):
+      1) assistant + category
+      2) assistant + baseline (recipe id endswith ".baseline")
+      3) assistant + any category
+      4) any assistant + category
+      5) any assistant + any category
+    """
+    notes: List[str] = []
+    tier = ""
+    # Tier 1: exact match
+    tier1 = [r for r in recipes if r.assistant == assistant and r.category == category]
+    if tier1:
+        tier = "assistant+category"
+        notes.append("tier=assistant+category")
+        return tier1, tier, notes
+    # Tier 2: assistant baseline
+    tier2 = [r for r in recipes if r.assistant == assistant and r.id.endswith(".baseline")]
+    if tier2:
+        tier = "assistant+baseline"
+        notes.append("tier=assistant+baseline")
+        return [tier2[0]], tier, notes
+    # Tier 3: assistant any category
+    tier3 = [r for r in recipes if r.assistant == assistant]
+    if tier3:
+        tier = "assistant+any"
+        notes.append("tier=assistant+any")
+        return [tier3[0]], tier, notes
+    # Tier 4: any assistant with category
+    tier4 = [r for r in recipes if r.category == category]
+    if tier4:
+        tier = "any+category"
+        notes.append("tier=any+category")
+        return [tier4[0]], tier, notes
+    # Tier 5: any
+    if recipes:
+        tier = "any+any"
+        notes.append("tier=any+any")
+        return [recipes[0]], tier, notes
+    # None
+    return [], "none", notes
 
 
 # Simple mtime-based cache for recipes
@@ -133,8 +184,11 @@ class RecipesCache:
             except ValidationError as e:
                 errors.append(RecipeError(file_path=path, error=str(e), error_type="schema_validation", line_number=None))
                 continue
-            for msg in validate_recipe(model):
+            sem_issues = validate_recipe(model)
+            for msg in sem_issues:
                 errors.append(RecipeError(file_path=path, error=msg, error_type="semantic_validation", line_number=None))
+            if VALIDATION_STRICT and sem_issues and model.category in _STRICT_CRITICAL_CATEGORIES:
+                continue
             valid.append(model)
             try:
                 mtimes[path] = os.stat(path).st_mtime_ns

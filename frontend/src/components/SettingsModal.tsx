@@ -24,7 +24,8 @@ export default function SettingsModal({ open, onClose, storeText, onToggleStoreT
     setLoading(true)
     setError(null)
     try {
-      const r = await apiRecipes()
+      // Call with explicit reload flag for clarity (backend treats all calls as reload today)
+      const r = await apiRecipes(/* reload= */ true)
       setRecipes(r)
     } catch (e: any) {
       setError(e?.message || 'Failed to load recipes')
@@ -83,9 +84,50 @@ export default function SettingsModal({ open, onClose, storeText, onToggleStoreT
           </div>
 
           <div className="text-green-400">Loaded Recipes & Validation</div>
-          <pre className="max-h-80 overflow-auto whitespace-pre-wrap text-green-200 bg-black/40 p-2 rounded border border-green-900">
-            {recipes ? JSON.stringify(recipes, null, 2) : 'No data'}
-          </pre>
+
+          {recipes && (
+            <div className="text-sm text-neutral-300 flex items-center gap-3">
+              <span>Recipes: <span className="text-green-400">{recipes.recipes?.length ?? 0}</span></span>
+              <span>Diagnostics: <span className="text-green-400">{recipes.errors?.length ?? 0}</span></span>
+            </div>
+          )}
+
+          <div className="flex items-center gap-2 text-sm mt-2">
+            <label>Severity:</label>
+            <select className="bg-neutral-900 px-2 py-1 rounded" value={severityFilter} onChange={(e) => setSeverityFilter(e.target.value as any)}>
+              <option value="all">All</option>
+              <option value="error">Error</option>
+              <option value="warning">Warning</option>
+            </select>
+            <input
+              className="bg-neutral-900 px-2 py-1 rounded flex-1"
+              placeholder="Filter by file path"
+              value={pathQuery}
+              onChange={(e) => setPathQuery(e.target.value)}
+            />
+          </div>
+
+          <div className="max-h-80 overflow-auto border border-green-900 rounded divide-y divide-green-900/30">
+            {(recipes?.errors || [])
+              .filter((e: any) => severityFilter === 'all' || e.severity === severityFilter)
+              .filter((e: any) => !pathQuery || (e.file_path || '').toLowerCase().includes(pathQuery.toLowerCase()))
+              .map((e: any, idx: number) => (
+                <div key={idx} className="p-2 text-sm">
+                  <div className="flex items-center justify-between gap-2">
+                    <code className="text-neutral-300 truncate">{e.file_path}</code>
+                    <div className="flex items-center gap-2">
+                      {e.error_type && <span className="px-2 py-0.5 rounded bg-neutral-800 text-neutral-300 text-xs">{e.error_type}</span>}
+                      {e.severity && <span className={`px-2 py-0.5 rounded text-xs ${e.severity === 'error' ? 'bg-red-900/60 text-red-300' : 'bg-yellow-900/60 text-yellow-300'}`}>{e.severity}</span>}
+                      {Number.isFinite(e.line_number) && <span className="px-2 py-0.5 rounded bg-neutral-800 text-neutral-300 text-xs">line {e.line_number}</span>}
+                    </div>
+                  </div>
+                  <div className="mt-1 text-neutral-400 whitespace-pre-wrap">{e.error}</div>
+                </div>
+              ))}
+            {recipes && (recipes.errors || []).length === 0 && (
+              <div className="p-2 text-neutral-400 text-sm">No diagnostics</div>
+            )}
+          </div>
         </div>
       </div>
     </div>

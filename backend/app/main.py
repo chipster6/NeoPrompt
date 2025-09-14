@@ -28,8 +28,8 @@ from .db import get_db, init_db, Decision, Feedback
 from .recipes import load_recipes, RecipeModel, validate_recipe, RecipesCache, RecipeError, filter_recipes
 from .optimizer import select_recipe, get_optimizer_stats
 from .bandit import BanditService, BanditConfig
+from . import metrics
 from .bandit import BanditService, BanditConfig
-from .engine import build_prompt
 from .enhancer import Enhancer
 from .guardrails import apply_domain_caps, sanitize_text
 
@@ -38,6 +38,8 @@ STORE_TEXT = os.getenv("STORE_TEXT", "0") == "1"
 ENHANCER_ENABLED = os.getenv("ENHANCER_ENABLED", "0") == "1"
 DEFAULT_EPSILON = float(os.getenv("EPSILON", "0.10"))
 BANDIT_ENABLED = os.getenv("BANDIT_ENABLED", "1") == "1"
+BANDIT_MIN_INITIAL_SAMPLES = int(os.getenv("BANDIT_MIN_INITIAL_SAMPLES", "1"))
+BANDIT_OPTIMISTIC_INITIAL_VALUE = float(os.getenv("BANDIT_OPTIMISTIC_INITIAL_VALUE", "0.0"))
 RECIPES_RELOAD_INTERVAL_SECONDS = float(os.getenv("RECIPES_RELOAD_INTERVAL_SECONDS", "5"))
 
 # Logging configuration
@@ -45,7 +47,11 @@ LOG_LEVEL = os.getenv("LOG_LEVEL", "INFO").upper()
 logging.basicConfig(level=getattr(logging, LOG_LEVEL, logging.INFO))
 logger = logging.getLogger("prompt_console")
 
+from prometheus_client import make_asgi_app
+
 app = FastAPI(title="Prompt Console API", version="0.1.0")
+# Mount /metrics for Prometheus (optional; lightweight)
+app.mount("/metrics", make_asgi_app())
 app.state.recipes_cache = RecipesCache(RECIPES_DIR)
 app.add_middleware(
     CORSMiddleware,
@@ -60,13 +66,14 @@ app.add_middleware(
 def on_startup():
     init_db()
     app.state.epsilon = DEFAULT_EPSILON
+    metrics.set_epsilon_gauge(app.state.epsilon)
     try:
         logger.info("Startup complete. RECIPES_DIR=%s EPSILON=%.2f", RECIPES_DIR, app.state.epsilon)
     except Exception:
         pass
     # Initialize bandit service with defaults; guard if bandit module unavailable
     try:
-        app.state.bandit_service = BanditService(BanditConfig(min_initial_samples=1, optimistic_initial_value=0.0))
+        app.state.bandit_service = BanditService(BanditConfig(min_initial_samples=BANDIT_MIN_INITIAL_SAMPLES, optimistic_initial_value=BANDIT_OPTIMISTIC_INITIAL_VALUE))
     except Exception:
         # Leave unset; choose() will treat as disabled if missing
         pass
@@ -104,7 +111,8 @@ def choose(req: ChooseRequest, db: Session = Depends(get_db)):
         # Tiered candidate filtering
         candidates, tier, tier_notes = filter_recipes(recipes, req.assistant, req.category)
         if not candidates:
-            raise HTTPException(status_code=404, detail={"code": "no_recipes_available", "message": "No recipes match the requested assistant/category"})
+            # If no candidates at all, treat as service unavailable (invalid library)
+            raise HTTPException(status_code=503, detail={"code": "recipes_unavailable", "message": "No valid recipes available, see /recipes for details"})
         pre_notes: list[str] = tier_notes
 
         # Optional enhancer
@@ -144,6 +152,7 @@ def choose(req: ChooseRequest, db: Session = Depends(get_db)):
         notes.append(f"explored={str(explored).lower()}")
 
         # Build prompt
+        from .engine import build_prompt  # local import to avoid test import cycles
         force_json = bool(req.options.get("force_json", False))
         prompt, applied_ops = build_prompt(
             raw_input=raw,
@@ -304,6 +313,103 @@ def recipes(reload: bool = False):
         raise HTTPException(status_code=500, detail=f"recipes_failed: {type(e).__name__}")
 
 
+@app.get("/bandit_stats")
+def get_bandit_stats(assistant: Optional[str] = None, category: Optional[str] = None, db: Session = Depends(get_db)):
+    # Return current BanditStats snapshot with avg_reward
+    q = db.query(
+        Decision.assistant,
+        Decision.category,
+        Decision.recipe_id,
+    )
+    # We will pull BanditStats directly to avoid expensive joins
+    from .db import BanditStats as _BS
+    bsq = db.query(_BS).filter(True)
+    if assistant:
+        bsq = bsq.filter(_BS.assistant == assistant)
+    if category:
+        bsq = bsq.filter(_BS.category == category)
+    rows = []
+    for r in bsq.all():
+        cnt = int(r.sample_count or 0)
+        s = float(r.reward_sum or 0.0)
+        avg = (s / cnt) if cnt > 0 else 0.0
+        rows.append({
+            "assistant": r.assistant,
+            "category": r.category,
+            "recipe_id": r.recipe_id,
+            "sample_count": cnt,
+            "reward_sum": s,
+            "avg_reward": avg,
+            "explore_count": int(r.explore_count or 0),
+            "exploit_count": int(r.exploit_count or 0),
+            "updated_at": r.updated_at,
+        })
+    return {"items": rows, "epsilon": float(getattr(app.state, "epsilon", DEFAULT_EPSILON))}
+
+
+@app.post("/bandit_config")
+def set_bandit_config(
+    epsilon: Optional[float] = Body(None, ge=0.0, le=1.0),
+    min_initial_samples: Optional[int] = Body(None, ge=0),
+    optimistic_initial_value: Optional[float] = Body(None, ge=0.0, le=1.0),
+):
+    # Update global bandit parameters
+    if epsilon is not None:
+        app.state.epsilon = float(epsilon)
+        metrics.set_epsilon_gauge(app.state.epsilon)
+    if hasattr(app.state, "bandit_service"):
+        bs: BanditService = app.state.bandit_service
+        if min_initial_samples is not None:
+            bs.config.min_initial_samples = int(min_initial_samples)
+        if optimistic_initial_value is not None:
+            bs.config.optimistic_initial_value = float(optimistic_initial_value)
+    return {"epsilon": float(getattr(app.state, "epsilon", DEFAULT_EPSILON)), "config": {
+        "min_initial_samples": getattr(app.state.bandit_service.config, "min_initial_samples", None) if hasattr(app.state, "bandit_service") else None,
+        "optimistic_initial_value": getattr(app.state.bandit_service.config, "optimistic_initial_value", None) if hasattr(app.state, "bandit_service") else None,
+    }}
+
+
+@app.post("/bandit_backfill")
+def bandit_backfill(assistant: Optional[str] = Body(None), category: Optional[str] = Body(None), db: Session = Depends(get_db)):
+    # Aggregate Decision+Feedback and seed BanditStats
+    from sqlalchemy import func
+    from .db import BanditStats as _BS
+    q = (
+        db.query(
+            Decision.assistant,
+            Decision.category,
+            Decision.recipe_id,
+            func.count(Feedback.reward),
+            func.sum(Feedback.reward),
+        )
+        .join(Feedback, Feedback.decision_id == Decision.id)
+        .group_by(Decision.assistant, Decision.category, Decision.recipe_id)
+    )
+    if assistant:
+        q = q.filter(Decision.assistant == assistant)
+    if category:
+        q = q.filter(Decision.category == category)
+    inserted = 0
+    for a, c, rid, cnt, s in q.all():
+        row = db.query(_BS).filter(_BS.assistant == a, _BS.category == c, _BS.recipe_id == rid).first()
+        if row is None:
+            row = _BS(assistant=a, category=c, recipe_id=rid, sample_count=int(cnt or 0), reward_sum=float(s or 0.0))
+            db.add(row)
+        else:
+            row.sample_count = int(cnt or 0)
+            row.reward_sum = float(s or 0.0)
+        inserted += 1
+    db.commit()
+    return {"ok": True, "rows": inserted}
+
+
+@app.get("/metrics")
+def metrics_endpoint():
+    data, content_type = metrics.metrics_response()
+    from fastapi import Response
+    return Response(content=data, media_type=content_type)
+
+
 @app.get("/stats", response_model=StatsResponse)
 def get_stats(
     assistant: Optional[str] = None,
@@ -339,6 +445,7 @@ def update_stats(
     try:
         if epsilon is not None:
             app.state.epsilon = float(epsilon)
+            metrics.set_epsilon_gauge(app.state.epsilon)
         if reset:
             # Delete feedback rows (optionally filtered by assistant/category)
             if assistant or category:
