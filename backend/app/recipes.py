@@ -396,7 +396,12 @@ class RecipesCache:
                             except Exception:
                                 errors.append(RecipeError(file_path=path, error=f"include escapes recipes/: {ent}", error_type="cross_file_validation", line_number=None))
                                 continue
-                            incs.append(target.relative_to(Path(self.recipes_dir).resolve()).as_posix())
+                            # restrict includes to _fragments directory
+                            rel_posix = target.relative_to(Path(self.recipes_dir).resolve()).as_posix()
+                            if "/_fragments/" not in rel_posix and not rel_posix.startswith("_fragments/"):
+                                errors.append(RecipeError(file_path=path, error=f"include must reference _fragments/: {ent}", error_type="cross_file_validation", line_number=None))
+                                continue
+                            incs.append(rel_posix)
                     else:
                         errors.append(RecipeError(file_path=path, error="include must be a list of relative file paths", error_type="schema_validation", line_number=None))
                 includes_by_file[path] = incs
@@ -511,6 +516,15 @@ class RecipesCache:
                 merged = self._deep_merge(merged, {k: v for k, v in raw.items() if k not in ("include", "extends")})
                 self._apply_operators_plus(merged)
                 merged = self._apply_env_substitution(merged, file_path=file_path, rid=rid, strict=strict, collect_errors=errors)
+                # operator whitelist validation
+                allowed_ops = {"role_hdr", "constraints", "io_format", "examples", "quality_bar"}
+                ops_val = merged.get("operators", [])
+                if isinstance(ops_val, list):
+                    for op in ops_val:
+                        if not isinstance(op, str) or op not in allowed_ops:
+                            errors.append(RecipeError(file_path=file_path, error=f"unknown operator '{op}'", error_type="schema_validation", line_number=None))
+                            if strict:
+                                block_errors = True
 
                 # Build model input
                 model_input = {
@@ -533,6 +547,16 @@ class RecipesCache:
                     if parts[0] in known_assistants and parts[1] in known_categories:
                         if parts[0] != asst or parts[1] != cat:
                             errors.append(RecipeError(file_path=file_path, error=f"assistant/category fields must match id prefix: {id_val}", error_type="semantic_validation", line_number=None))
+                            if strict:
+                                block_errors = True
+                # extends assistant/category compatibility
+                for parent in id_graph.get(rid, []):
+                    pfile = id_to_file.get(parent)
+                    if pfile and parent in compiled_by_id:
+                        p = compiled_by_id[parent]
+                        pa, pc = p.get("assistant"), p.get("category")
+                        if pa and pc and (pa != asst or pc != cat):
+                            errors.append(RecipeError(file_path=file_path, error=f"extends parent '{parent}' assistant/category mismatch", error_type="cross_file_validation", line_number=None))
                             if strict:
                                 block_errors = True
                 try:
