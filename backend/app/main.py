@@ -29,11 +29,17 @@ from .optimizer import select_recipe, get_optimizer_stats
 from .enhancer import Enhancer
 from .guardrails import apply_domain_caps, sanitize_text
 from . import metrics  # ensure metrics is imported for endpoints that reference it
+from .bandit import BanditService, BanditConfig
 
 RECIPES_DIR = os.getenv("RECIPES_DIR", os.path.abspath(os.path.join(os.path.dirname(__file__), "../../recipes")))
 STORE_TEXT = os.getenv("STORE_TEXT", "0") == "1"
 ENHANCER_ENABLED = os.getenv("ENHANCER_ENABLED", "0") == "1"
 DEFAULT_EPSILON = float(os.getenv("EPSILON", "0.10"))
+
+# Feature flags (Bandit)
+BANDIT_ENABLED = os.getenv("BANDIT_ENABLED", "0") == "1"
+BANDIT_MIN_INITIAL_SAMPLES = int(os.getenv("BANDIT_MIN_INITIAL_SAMPLES", "1"))
+BANDIT_OPTIMISTIC_INITIAL_VALUE = float(os.getenv("BANDIT_OPTIMISTIC_INITIAL_VALUE", "0.0"))
 
 # Hot-reload configuration
 RELOAD_MODE = os.getenv("RECIPES_RELOAD_MODE", "events").lower()  # events|poll|off
@@ -119,6 +125,28 @@ async def _recipes_watch_loop():
 def on_startup():
     init_db()
     app.state.epsilon = DEFAULT_EPSILON
+    # Publish epsilon gauge
+    try:
+        metrics.set_epsilon_gauge(app.state.epsilon)
+    except Exception:
+        pass
+    # Initialize bandit service if enabled
+    try:
+        if BANDIT_ENABLED:
+            cfg = BanditConfig(
+                min_initial_samples=int(BANDIT_MIN_INITIAL_SAMPLES),
+                optimistic_initial_value=float(BANDIT_OPTIMISTIC_INITIAL_VALUE),
+            )
+            app.state.bandit_service = BanditService(cfg)
+            logger.info(
+                "bandit.enabled true (min_initial_samples=%d optimistic_initial_value=%.3f)",
+                cfg.min_initial_samples,
+                cfg.optimistic_initial_value,
+            )
+        else:
+            logger.info("bandit.enabled false")
+    except Exception as e:
+        logger.exception("failed_to_init_bandit_service: %s", e)
     try:
         logger.info(
             "Startup complete. RECIPES_DIR=%s EPSILON=%.2f reload_mode=%s interval=%s debounce_ms=%s",
@@ -179,11 +207,22 @@ def choose(req: ChooseRequest, db: Session = Depends(get_db)):
         else:
             notes.append("sanitized=false")
 
-        # Selection via optimizer
+        # Selection via optimizer or bandit
         epsilon = float(getattr(app.state, "epsilon", DEFAULT_EPSILON))
-        recipe, propensity, policy = select_recipe(db, req.assistant, req.category, candidates, epsilon=epsilon)
+        explored_flag = None
+        if BANDIT_ENABLED and hasattr(app.state, "bandit_service") and app.state.bandit_service is not None:
+            try:
+                bs = app.state.bandit_service  # type: ignore[attr-defined]
+                recipe, propensity, policy, explored_flag = bs.select_recipe(db, req.assistant, req.category, candidates, epsilon)
+            except Exception as e:
+                logger.exception("bandit_select_failed_falling_back: %s", e)
+                recipe, propensity, policy = select_recipe(db, req.assistant, req.category, candidates, epsilon=epsilon)
+        else:
+            recipe, propensity, policy = select_recipe(db, req.assistant, req.category, candidates, epsilon=epsilon)
         notes.append(f"policy={policy}")
         notes.append(f"epsilon={epsilon:.2f}")
+        if explored_flag is not None:
+            notes.append(f"explored={str(bool(explored_flag)).lower()}")
 
         # Build prompt
         from .engine import build_prompt  # local import to avoid test import cycles
@@ -311,7 +350,7 @@ def history(
 
 
 @app.get("/recipes", response_model=RecipesResponse)
-def recipes(reload: bool = False):
+def recipes(reload: bool = False, deps: bool = False):
     try:
         recipes, errors = _load_recipe_cache(force=bool(reload))
         # Convert to API schema and include validation issues
@@ -338,16 +377,18 @@ def recipes(reload: bool = False):
                 "error_type": getattr(err, "error_type", None),
                 "severity": severity,
             })
-        # Optional metadata for diagnostics
-        try:
+        result = {"recipes": api_recipes, "errors": error_objs}
+        if deps:
             cache = getattr(app.state, "recipes_cache")
-            meta = {
-                "dir": RECIPES_DIR,
-                "epsilon": float(getattr(app.state, "epsilon", DEFAULT_EPSILON)),
-            }
-        except Exception:
-            meta = {"dir": RECIPES_DIR}
-        return {"recipes": api_recipes, "errors": error_objs, "meta": meta}
+            try:
+                by_id, by_file = cache.get_deps()
+                result["deps"] = {
+                    "by_id": by_id,
+                    "by_file": by_file,
+                }
+            except Exception:
+                pass
+        return result
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"recipes_failed: {type(e).__name__}")
 

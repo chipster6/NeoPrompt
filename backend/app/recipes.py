@@ -56,6 +56,25 @@ def _parse_yaml(path: str) -> Tuple[Optional[dict], Optional[RecipeError]]:
 # Recursive scanning support for recipes subdirectories
 RECIPES_RECURSIVE = os.getenv("RECIPES_RECURSIVE", "0") == "1"
 
+# Optional validation scope: controls when semantic warnings exclude recipes under strict mode
+# Defaults preserve existing behavior (exclude for all categories when strict=1)
+VALIDATION_STRICT_SCOPE_DEFAULT = "all"
+
+
+def _strict_filter_applies(category: str, strict: bool, scope: str) -> bool:
+    """Return True if semantic-invalid recipes should be excluded for this category.
+
+    - If strict is False -> never exclude on semantic warnings.
+    - If scope == "all" -> exclude for all categories.
+    - If scope == "critical" -> exclude only for critical categories (law/medical).
+    """
+    if not strict:
+        return False
+    scope = (scope or VALIDATION_STRICT_SCOPE_DEFAULT).lower()
+    if scope == "critical":
+        return category in {"law", "medical"}
+    return True
+
 
 def load_recipes(recipes_dir: str) -> Tuple[List[RecipeModel], List[RecipeError]]:
     """One-shot load using RecipesCache for convenience."""

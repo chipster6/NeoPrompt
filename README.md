@@ -80,6 +80,39 @@ npm run dev
 # Open http://localhost:5173
 ```
 
+## Configuration
+
+Environment variables and defaults
+
+- Core
+  - RECIPES_DIR: Path to recipes directory (default backend/app/../../recipes)
+  - LOG_LEVEL: Logging level (default INFO)
+  - DATABASE_URL: SQLAlchemy database URL (default sqlite:///./console.sqlite)
+  - STORE_TEXT: 1 to store raw/engineered text with decisions; 0 to disable (default 0)
+  - EPSILON: Exploration rate for ε-greedy optimizer (default 0.10)
+
+- Reload
+  - RECIPES_RELOAD_MODE: events | poll | off (default events)
+  - RECIPES_RELOAD_INTERVAL_SECONDS: polling interval (default 5)
+  - RECIPES_DEBOUNCE_MS: debounce for file events (default 300)
+  - RECIPES_RECURSIVE: set to 1 to watch recipes/**/*.yaml recursively (default 0)
+
+- Validation
+  - VALIDATION_STRICT: 0/1 (default 0). When 1, semantic-invalid recipes are excluded according to scope.
+  - VALIDATION_STRICT_SCOPE: all | critical (default all). When strict=1 and scope=critical, semantic-invalid are excluded only for law/medical categories.
+
+- Bandit (feature-flagged rollout)
+  - BANDIT_ENABLED: 0/1 (default 0). When 1, /choose delegates selection to BanditService.
+  - BANDIT_MIN_INITIAL_SAMPLES: Cold-start threshold per recipe before exploitation (default 1)
+  - BANDIT_OPTIMISTIC_INITIAL_VALUE: Prior mean for unseen recipes (default 0.0)
+  - Runtime tuning: POST /bandit_config; metrics at GET /metrics; stats at GET /bandit_stats.
+
+- Enhancer (optional)
+  - ENHANCER_ENABLED: 0/1 (default 0)
+  - ENHANCER_ENDPOINT, ENHANCER_API_KEY
+  - ENHANCER_MODEL (default google/flan-t5-base)
+  - ENHANCER_MAX_NEW_TOKENS (default 128)
+
 ## Hot Reload and Recipe Diagnostics
 
 - The backend maintains an in-memory cache of the last-known-good recipes (atomic snapshot).
@@ -95,7 +128,7 @@ Hot-reload modes and env vars
 
 Force reload
 ```bash
-curl -s 'http://127.0.0.1:7070/recipes?reload=true' | jq
+curl -s 'http://127.0.0.1:7070/recipes?deps=true' | jq
 ```
 
 You can also fetch diagnostics only:
