@@ -63,6 +63,24 @@ npm run dev
 # Open http://localhost:5173
 ```
 
+## Hot Reload and Recipe Diagnostics
+
+- The backend maintains an in-memory cache of the last-known-good recipes.
+- Editing YAML files under `recipes/` is picked up automatically via mtime checks.
+- You can force a synchronous reload with:
+
+```bash
+curl -s 'http://127.0.0.1:7070/recipes?reload=true' | jq
+```
+
+- The `/recipes` endpoint returns both parsed recipes and validation errors/warnings with fields:
+  - `file_path`, `error`, `line_number` (when available), and `error_type` (`yaml_parse`, `schema_validation`, `semantic_validation`).
+- If no valid recipes are available, `/choose` responds with a structured 503:
+
+```json
+{"detail": {"code": "recipes_unavailable", "message": "No valid recipes available, see /recipes for details"}}
+```
+
 ## Milestones
 
 - **M1 - Functional MVP**: Core prompt generation, copy functionality, basic feedback

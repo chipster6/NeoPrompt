@@ -84,6 +84,7 @@ class RecipeValidationError(BaseModel):
     file_path: str
     error: str
     line_number: Optional[int] = None
+    error_type: Optional[str] = None
 
 
 class RecipesResponse(BaseModel):

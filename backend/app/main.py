@@ -22,8 +22,10 @@ from .schemas import (
     StatsItem,
 )
 from .db import get_db, init_db, Decision, Feedback
-from .recipes import load_recipes, RecipeModel, validate_recipe
+from .recipes import load_recipes, RecipeModel, validate_recipe, RecipesCache, RecipeError
 from .optimizer import select_recipe, get_optimizer_stats
+from .bandit import BanditService, BanditConfig
+from .bandit import BanditService, BanditConfig
 from .engine import build_prompt
 from .enhancer import Enhancer
 from .guardrails import apply_domain_caps, sanitize_text
@@ -32,8 +34,10 @@ RECIPES_DIR = os.getenv("RECIPES_DIR", os.path.abspath(os.path.join(os.path.dirn
 STORE_TEXT = os.getenv("STORE_TEXT", "0") == "1"
 ENHANCER_ENABLED = os.getenv("ENHANCER_ENABLED", "0") == "1"
 DEFAULT_EPSILON = float(os.getenv("EPSILON", "0.10"))
+BANDIT_ENABLED = os.getenv("BANDIT_ENABLED", "1") == "1"
 
 app = FastAPI(title="Prompt Console API", version="0.1.0")
+app.state.recipes_cache = RecipesCache(RECIPES_DIR)
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
@@ -47,57 +51,63 @@ app.add_middleware(
 def on_startup():
     init_db()
     app.state.epsilon = DEFAULT_EPSILON
+    # Initialize bandit service with defaults; guard if bandit module unavailable
+    try:
+        app.state.bandit_service = BanditService(BanditConfig(min_initial_samples=1, optimistic_initial_value=0.0))
+    except Exception:
+        # Leave unset; choose() will treat as disabled if missing
+        pass
 
 
-# Cache recipes in-memory; simple approach with reload query param to refresh
-def _load_recipe_cache() -> tuple[list[RecipeModel], list[tuple[str, str]]]:
-    recipes, errors = load_recipes(RECIPES_DIR)
+# Recipes cache: serve last-known-good; allow force reload via flag
+def _load_recipe_cache(force: bool = False) -> tuple[list[RecipeModel], list[RecipeError]]:
+    cache = getattr(app.state, "recipes_cache")
+    recipes, errors = cache.ensure_loaded(force=force)
     return recipes, errors
 
 
 @app.post("/choose", response_model=ChooseResponse)
 def choose(req: ChooseRequest, db: Session = Depends(get_db)):
-    recipes, errors = _load_recipe_cache()
-    candidates = [r for r in recipes if r.assistant == req.assistant and r.category == req.category]
+    try:
+        recipes, errors = _load_recipe_cache(force=False)
+        candidates = [r for r in recipes if r.assistant == req.assistant and r.category == req.category]
 
-    # Fallback strategy: prefer a baseline recipe for the requested assistant,
-    # then any recipe for that assistant, then a recipe for the requested category,
-    # and finally any available recipe.
-    pre_notes: list[str] = []
-    if not candidates:
-        assistant_recipes = [r for r in recipes if r.assistant == req.assistant]
-        chosen = None
-        if assistant_recipes:
-            baseline = [r for r in assistant_recipes if r.id.endswith(".baseline")]
-            chosen = baseline[0] if baseline else assistant_recipes[0]
-            pre_notes.append("fallback=assistant")
-        else:
-            cat_recipes = [r for r in recipes if r.category == req.category]
-            if cat_recipes:
-                chosen = cat_recipes[0]
-                pre_notes.append("fallback=category")
-            elif recipes:
-                chosen = recipes[0]
-                pre_notes.append("fallback=any")
-        if chosen:
-            candidates = [chosen]
-        else:
-            raise ValueError("No recipes available for the given assistant/category")
+        # Fallback strategy: prefer a baseline recipe for the requested assistant,
+        # then any recipe for that assistant, then a recipe for the requested category,
+        # and finally any available recipe.
+        pre_notes: list[str] = []
+        if not candidates:
+            assistant_recipes = [r for r in recipes if r.assistant == req.assistant]
+            chosen = None
+            if assistant_recipes:
+                baseline = [r for r in assistant_recipes if r.id.endswith(".baseline")]
+                chosen = baseline[0] if baseline else assistant_recipes[0]
+                pre_notes.append("fallback=assistant")
+            else:
+                cat_recipes = [r for r in recipes if r.category == req.category]
+                if cat_recipes:
+                    chosen = cat_recipes[0]
+                    pre_notes.append("fallback=category")
+                elif recipes:
+                    chosen = recipes[0]
+                    pre_notes.append("fallback=any")
+            if chosen:
+                candidates = [chosen]
+            else:
+                raise HTTPException(status_code=503, detail={"code": "recipes_unavailable", "message": "No valid recipes available, see /recipes for details"})
 
-    # Optional enhancer
-    raw = req.raw_input
-    notes: list[str] = []
-    if ENHANCER_ENABLED and req.options.get("enhance"):
-        enh = Enhancer()
-        enhanced = enh.enhance(raw, req.assistant, req.category)
-        raw = enhanced
-        notes.append("enhanced=true")
-    else:
-        notes.append("enhanced=false")
-    # Include any pre-collected fallback notes
-    notes.extend(pre_notes)
+        # Optional enhancer
+        raw = req.raw_input
+        notes: list[str] = []
+        if ENHANCER_ENABLED and req.options.get("enhance"):
+            enh = Enhancer()
+            enhanced = enh.enhance(raw, req.assistant, req.category)
+            raw = enhanced
+            notes.append("enhanced=true")
         else:
             notes.append("enhanced=false")
+        # Include any pre-collected fallback notes
+        notes.extend(pre_notes)
 
         # Sanitize input (guardrails)
         cleaned = sanitize_text(raw)
@@ -107,9 +117,16 @@ def choose(req: ChooseRequest, db: Session = Depends(get_db)):
         else:
             notes.append("sanitized=false")
 
-        # Selection via optimizer
+        # Selection via optimizer (feature-flagged)
+        policy = "disabled" if not BANDIT_ENABLED else None
         epsilon = float(getattr(app.state, "epsilon", DEFAULT_EPSILON))
-        recipe, propensity, policy = select_recipe(db, req.assistant, req.category, candidates, epsilon=epsilon)
+        if BANDIT_ENABLED and hasattr(app.state, "bandit_service"):
+            bs: BanditService = app.state.bandit_service
+            recipe, propensity, policy = bs.select_recipe(db, req.assistant, req.category, candidates, epsilon=epsilon)
+        else:
+            # Deterministic fallback to first candidate
+            recipe = candidates[0]
+            propensity = 1.0
         notes.append(f"policy={policy}")
         notes.append(f"epsilon={epsilon:.2f}")
 
@@ -140,7 +157,7 @@ def choose(req: ChooseRequest, db: Session = Depends(get_db)):
         )
         dec.set_context_dict({
             "input_tokens": req.context_features.get("input_tokens", 0),
-            "lang": req.context_features.get("lang", "en"),
+            "language": req.context_features.get("language", req.context_features.get("lang", "en")),
             "force_json": force_json,
             "enhanced": "enhanced=true" in notes,
         })
@@ -170,8 +187,6 @@ def choose(req: ChooseRequest, db: Session = Depends(get_db)):
         raise
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"choose_failed: {type(e).__name__}")
-
-
 @app.post("/feedback", response_model=FeedbackResponse)
 def feedback(req: FeedbackRequest, db: Session = Depends(get_db)):
     try:
@@ -186,6 +201,10 @@ def feedback(req: FeedbackRequest, db: Session = Depends(get_db)):
         fb.set_components_dict({k: float(v) for k, v in req.reward_components.items()})
         fb.set_safety_flags_list(list(req.safety_flags))
         db.add(fb)
+        # Update bandit persistent stats if available
+        if hasattr(app.state, "bandit_service"):
+            bs: BanditService = app.state.bandit_service
+            bs.record_feedback(db, d.assistant, d.category, d.recipe_id, float(req.reward))
         db.commit()
         return FeedbackResponse(ok=True)
     except HTTPException:
@@ -237,7 +256,7 @@ def history(
 @app.get("/recipes", response_model=RecipesResponse)
 def recipes(reload: bool = False):
     try:
-        recipes, errors = _load_recipe_cache()
+        recipes, errors = _load_recipe_cache(force=bool(reload))
         # Convert to API schema and include validation issues
         api_recipes: list[RecipeSchema] = []
         for r in recipes:
@@ -253,8 +272,13 @@ def recipes(reload: bool = False):
                 )
             )
         error_objs = []
-        for path, err in errors:
-            error_objs.append({"file_path": path, "error": err, "line_number": None})
+        for err in errors:
+            error_objs.append({
+                "file_path": err.file_path,
+                "error": err.error,
+                "line_number": err.line_number,
+                "error_type": getattr(err, "error_type", None),
+            })
         return {"recipes": api_recipes, "errors": error_objs}
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"recipes_failed: {type(e).__name__}")
