@@ -4,9 +4,8 @@ import os
 import uuid
 import logging
 import asyncio
-import random
 from datetime import datetime
-from typing import List, Optional
+from typing import List, Optional, Iterable
 
 from fastapi import FastAPI, Depends, Query, HTTPException, Body
 from fastapi.middleware.cors import CORSMiddleware
@@ -27,31 +26,32 @@ from .schemas import (
 from .db import get_db, init_db, Decision, Feedback
 from .recipes import load_recipes, RecipeModel, validate_recipe, RecipesCache, RecipeError, filter_recipes
 from .optimizer import select_recipe, get_optimizer_stats
-from .bandit import BanditService, BanditConfig
-from . import metrics
-from .bandit import BanditService, BanditConfig
 from .enhancer import Enhancer
 from .guardrails import apply_domain_caps, sanitize_text
+from . import metrics  # ensure metrics is imported for endpoints that reference it
 
 RECIPES_DIR = os.getenv("RECIPES_DIR", os.path.abspath(os.path.join(os.path.dirname(__file__), "../../recipes")))
 STORE_TEXT = os.getenv("STORE_TEXT", "0") == "1"
 ENHANCER_ENABLED = os.getenv("ENHANCER_ENABLED", "0") == "1"
 DEFAULT_EPSILON = float(os.getenv("EPSILON", "0.10"))
-BANDIT_ENABLED = os.getenv("BANDIT_ENABLED", "1") == "1"
-BANDIT_MIN_INITIAL_SAMPLES = int(os.getenv("BANDIT_MIN_INITIAL_SAMPLES", "1"))
-BANDIT_OPTIMISTIC_INITIAL_VALUE = float(os.getenv("BANDIT_OPTIMISTIC_INITIAL_VALUE", "0.0"))
-RECIPES_RELOAD_INTERVAL_SECONDS = float(os.getenv("RECIPES_RELOAD_INTERVAL_SECONDS", "5"))
+
+# Hot-reload configuration
+RELOAD_MODE = os.getenv("RECIPES_RELOAD_MODE", "events").lower()  # events|poll|off
+RELOAD_INTERVAL_SECONDS = int(os.getenv("RECIPES_RELOAD_INTERVAL_SECONDS", "5"))
+RELOAD_DEBOUNCE_MS = int(os.getenv("RECIPES_DEBOUNCE_MS", "300"))
+
+# Try import watchfiles (optional)
+try:
+    from watchfiles import awatch
+except Exception:  # pragma: no cover - optional dependency
+    awatch = None  # type: ignore
 
 # Logging configuration
 LOG_LEVEL = os.getenv("LOG_LEVEL", "INFO").upper()
 logging.basicConfig(level=getattr(logging, LOG_LEVEL, logging.INFO))
 logger = logging.getLogger("prompt_console")
 
-from prometheus_client import make_asgi_app
-
 app = FastAPI(title="Prompt Console API", version="0.1.0")
-# Mount /metrics for Prometheus (optional; lightweight)
-app.mount("/metrics", make_asgi_app())
 app.state.recipes_cache = RecipesCache(RECIPES_DIR)
 app.add_middleware(
     CORSMiddleware,
@@ -61,46 +61,87 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# Initialize DB on startup
+
+async def _recipes_watch_loop():
+    """Background task to watch recipes directory and trigger reloads."""
+    cache: RecipesCache = app.state.recipes_cache
+
+    # Initial load
+    cache.ensure_loaded(force=True, reason="startup")
+
+    mode = RELOAD_MODE
+    if mode == "off":
+        logger.info("recipes.watch disabled (mode=off)")
+        return
+
+    # Prefer events if available
+    use_events = (mode == "events") and (awatch is not None)
+    if use_events:
+        logger.info(
+            "recipes.watch starting backend=watchfiles dir=%s debounce_ms=%d",
+            RECIPES_DIR,
+            RELOAD_DEBOUNCE_MS,
+        )
+        try:
+            async for changes in awatch(RECIPES_DIR, debounce=RELOAD_DEBOUNCE_MS / 1000):
+                try:
+                    changed_paths = [str(p) for (_change, p) in changes]
+                    if any(p.endswith(".yaml") for p in changed_paths):
+                        cache.apply_fs_events(changed_paths, reason="events")
+                except Exception as e:
+                    logger.exception("recipes.watch event handling failed: %s", e)
+        except asyncio.CancelledError:
+            logger.info("recipes.watch cancelled")
+            return
+        except Exception as e:
+            logger.exception("recipes.watch failed, falling back to poll: %s", e)
+            # Fall through to polling
+            use_events = False
+
+    if (mode == "poll") or not use_events:
+        interval = max(1, int(RELOAD_INTERVAL_SECONDS))
+        logger.info("recipes.poll starting interval_seconds=%d dir=%s", interval, RECIPES_DIR)
+        try:
+            while True:
+                cache.ensure_loaded(force=False, reason="poll")
+                await asyncio.sleep(interval)
+        except asyncio.CancelledError:
+            logger.info("recipes.poll cancelled")
+            return
+        except Exception as e:
+            logger.exception("recipes.poll loop error: %s", e)
+            # Keep looping after logging
+            await asyncio.sleep(interval)
+
+
+# Initialize DB and watcher on startup
 @app.on_event("startup")
 def on_startup():
     init_db()
     app.state.epsilon = DEFAULT_EPSILON
-    metrics.set_epsilon_gauge(app.state.epsilon)
     try:
-        logger.info("Startup complete. RECIPES_DIR=%s EPSILON=%.2f", RECIPES_DIR, app.state.epsilon)
+        logger.info(
+            "Startup complete. RECIPES_DIR=%s EPSILON=%.2f reload_mode=%s interval=%s debounce_ms=%s",
+            RECIPES_DIR,
+            app.state.epsilon,
+            RELOAD_MODE,
+            RELOAD_INTERVAL_SECONDS,
+            RELOAD_DEBOUNCE_MS,
+        )
     except Exception:
         pass
-    # Initialize bandit service with defaults; guard if bandit module unavailable
+    # Start watcher task
     try:
-        app.state.bandit_service = BanditService(BanditConfig(min_initial_samples=BANDIT_MIN_INITIAL_SAMPLES, optimistic_initial_value=BANDIT_OPTIMISTIC_INITIAL_VALUE))
-    except Exception:
-        # Leave unset; choose() will treat as disabled if missing
-        pass
-
-    # Start background polling task for recipes hot-reload
-    async def _recipes_reloader():
-        cache = app.state.recipes_cache
-        interval = max(0.5, float(RECIPES_RELOAD_INTERVAL_SECONDS))
-        while True:
-            try:
-                # small jitter to avoid lockstep with editors
-                jitter = random.uniform(-0.3, 0.3) * interval
-                await asyncio.sleep(max(0.1, interval + jitter))
-                cache.ensure_loaded(force=True)
-            except asyncio.CancelledError:
-                break
-            except Exception:
-                # Keep loop alive; errors surface via /recipes
-                pass
-
-    app.state.recipes_reload_task = asyncio.create_task(_recipes_reloader())
+        app.state.recipes_reload_task = asyncio.create_task(_recipes_watch_loop())
+    except Exception as e:
+        logger.exception("failed_to_start_recipes_watch_loop: %s", e)
 
 
 # Recipes cache: serve last-known-good; allow force reload via flag
 def _load_recipe_cache(force: bool = False) -> tuple[list[RecipeModel], list[RecipeError]]:
     cache = getattr(app.state, "recipes_cache")
-    recipes, errors = cache.ensure_loaded(force=force)
+    reason = "manual" if force else "api"
+    recipes, errors = cache.ensure_loaded(force=force, reason=reason)
     return recipes, errors
 
 
@@ -108,11 +149,13 @@ def _load_recipe_cache(force: bool = False) -> tuple[list[RecipeModel], list[Rec
 def choose(req: ChooseRequest, db: Session = Depends(get_db)):
     try:
         recipes, errors = _load_recipe_cache(force=False)
+        if not recipes and errors:
+            # No valid recipes available due to parse/validation errors
+            raise HTTPException(status_code=503, detail={"code": "recipes_unavailable", "message": "No valid recipes available, see /recipes for details"})
         # Tiered candidate filtering
         candidates, tier, tier_notes = filter_recipes(recipes, req.assistant, req.category)
         if not candidates:
-            # If no candidates at all, treat as service unavailable (invalid library)
-            raise HTTPException(status_code=503, detail={"code": "recipes_unavailable", "message": "No valid recipes available, see /recipes for details"})
+            raise HTTPException(status_code=404, detail={"code": "no_recipes_available", "message": "No recipes match the requested assistant/category"})
         pre_notes: list[str] = tier_notes
 
         # Optional enhancer
@@ -136,20 +179,11 @@ def choose(req: ChooseRequest, db: Session = Depends(get_db)):
         else:
             notes.append("sanitized=false")
 
-        # Selection via optimizer (feature-flagged)
-        policy = "disabled" if not BANDIT_ENABLED else None
+        # Selection via optimizer
         epsilon = float(getattr(app.state, "epsilon", DEFAULT_EPSILON))
-        if BANDIT_ENABLED and hasattr(app.state, "bandit_service"):
-            bs: BanditService = app.state.bandit_service
-            recipe, propensity, policy, explored = bs.select_recipe(db, req.assistant, req.category, candidates, epsilon=epsilon)
-        else:
-            # Deterministic fallback to first candidate
-            recipe = candidates[0]
-            propensity = 1.0
-            explored = False
+        recipe, propensity, policy = select_recipe(db, req.assistant, req.category, candidates, epsilon=epsilon)
         notes.append(f"policy={policy}")
         notes.append(f"epsilon={epsilon:.2f}")
-        notes.append(f"explored={str(explored).lower()}")
 
         # Build prompt
         from .engine import build_prompt  # local import to avoid test import cycles
@@ -182,9 +216,6 @@ def choose(req: ChooseRequest, db: Session = Depends(get_db)):
             "language": req.context_features.get("language", req.context_features.get("lang", "en")),
             "force_json": force_json,
             "enhanced": "enhanced=true" in notes,
-            "policy": policy,
-            "epsilon": epsilon,
-            "explored": explored,
         })
         dec.set_hparams_dict(hparams)
         dec.set_operators_list(applied_ops)
@@ -307,10 +338,37 @@ def recipes(reload: bool = False):
                 "error_type": getattr(err, "error_type", None),
                 "severity": severity,
             })
-            
-        return {"recipes": api_recipes, "errors": error_objs}
+        # Optional metadata for diagnostics
+        try:
+            cache = getattr(app.state, "recipes_cache")
+            meta = {
+                "dir": RECIPES_DIR,
+                "epsilon": float(getattr(app.state, "epsilon", DEFAULT_EPSILON)),
+            }
+        except Exception:
+            meta = {"dir": RECIPES_DIR}
+        return {"recipes": api_recipes, "errors": error_objs, "meta": meta}
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"recipes_failed: {type(e).__name__}")
+
+
+@app.get("/diagnostics")
+def get_diagnostics():
+    try:
+        _, errors = _load_recipe_cache(force=False)
+        items = []
+        for err in errors:
+            severity = "warning" if getattr(err, "error_type", None) == "semantic_validation" else "error"
+            items.append({
+                "file_path": err.file_path,
+                "error": err.error,
+                "line_number": err.line_number,
+                "error_type": getattr(err, "error_type", None),
+                "severity": severity,
+            })
+        return {"count": len(items), "items": items}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"diagnostics_failed: {type(e).__name__}")
 
 
 @app.get("/bandit_stats")
