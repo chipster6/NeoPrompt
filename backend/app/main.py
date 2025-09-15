@@ -89,7 +89,7 @@ async def _recipes_watch_loop():
             RELOAD_DEBOUNCE_MS,
         )
         try:
-            async for changes in awatch(RECIPES_DIR, debounce=RELOAD_DEBOUNCE_MS / 1000):
+            async for changes in awatch(RECIPES_DIR, debounce=RELOAD_DEBOUNCE_MS):
                 try:
                     changed_paths = [str(p) for (_change, p) in changes]
                     if any(p.endswith(".yaml") for p in changed_paths):

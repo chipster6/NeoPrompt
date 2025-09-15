@@ -39,8 +39,18 @@ class RecipeError:
     line_number: Optional[int] = None
 
 
+# Security limits (per-file and aggregate for includes)
+MAX_FILE_SIZE_BYTES = int(os.getenv("RECIPES_MAX_FILE_SIZE_BYTES", "262144"))
+
+
 def _parse_yaml(path: str) -> Tuple[Optional[dict], Optional[RecipeError]]:
     try:
+        try:
+            size = os.stat(path).st_size
+        except FileNotFoundError:
+            size = 0
+        if size > MAX_FILE_SIZE_BYTES:
+            return None, RecipeError(file_path=path, error=f"file too large: {size} bytes > limit {MAX_FILE_SIZE_BYTES}", error_type="security_validation", line_number=None)
         with open(path, "r", encoding="utf-8") as f:
             data = yaml.safe_load(f) or {}
         return data, None
@@ -61,6 +71,10 @@ RECIPES_RECURSIVE = os.getenv("RECIPES_RECURSIVE", "0") == "1"
 VALIDATION_STRICT_SCOPE_DEFAULT = "all"
 
 
+# ENV allow/deny policy for substitution (resolved at substitution time to honor runtime env changes)
+ENV_PATTERN = re.compile(r"\$\{ENV:([A-Za-z_][A-Za-z0-9_]*)(?::-(.*?))?\}")
+
+
 def _strict_filter_applies(category: str, strict: bool, scope: str) -> bool:
     """Return True if semantic-invalid recipes should be excluded for this category.
 
@@ -74,6 +88,35 @@ def _strict_filter_applies(category: str, strict: bool, scope: str) -> bool:
     if scope == "critical":
         return category in {"law", "medical"}
     return True
+
+
+def _subst_env_str(val: str, collect_errors: List[RecipeError], file_path: str) -> str:
+    def repl(m):
+        var = m.group(1)
+        default = m.group(2)
+        # Resolve policy from current environment at substitution time
+        allowlist = [s.strip() for s in os.getenv("RECIPES_ENV_ALLOWLIST", "").split(",") if s.strip()]
+        denylist = [s.strip() for s in os.getenv("RECIPES_ENV_DENYLIST", "").split(",") if s.strip()]
+        denied = any(var.startswith(p) or var == p for p in denylist)
+        allowed = (not allowlist) or any(var.startswith(p) or var == p for p in allowlist)
+        if denied or not allowed:
+            collect_errors.append(RecipeError(file_path=file_path, error=f"env var '{var}' blocked by policy", error_type="security_validation", line_number=None))
+            return default if default is not None else m.group(0)
+        return os.environ.get(var, default if default is not None else m.group(0))
+    return ENV_PATTERN.sub(repl, val)
+
+
+def _apply_env_substitution(self, data: Dict[str, Any], *, file_path: str, rid: str, strict: bool, collect_errors: List[RecipeError]) -> Dict[str, Any]:
+    # Walk and replace strings
+    def walk(node):
+        if isinstance(node, dict):
+            return {k: walk(v) for k, v in node.items()}
+        if isinstance(node, list):
+            return [walk(v) for v in node]
+        if isinstance(node, str):
+            return _subst_env_str(node, collect_errors, file_path)
+        return node
+    return walk(data)
 
 
 def load_recipes(recipes_dir: str) -> Tuple[List[RecipeModel], List[RecipeError]]:
@@ -195,6 +238,263 @@ class RecipesCache:
             return sorted(glob.glob(os.path.join(self.recipes_dir, "**", "*.yaml"), recursive=True))
         return sorted(glob.glob(os.path.join(self.recipes_dir, "*.yaml")))
 
+    # Incremental reload: selectively recompile recipes impacted by fragment changes.
+    # For structural changes to top-level recipe files, fall back to full reload.
+    def apply_fs_events(self, changed_paths: Iterable[str], reason: str = "events") -> Tuple[List[RecipeModel], List[RecipeError]]:
+        # Ensure we've loaded at least once
+        if not self._compiled_by_id:
+            return self.ensure_loaded(force=True, reason=reason)
+        # Normalize
+        abs_changed = [os.path.abspath(str(p)) for p in changed_paths if str(p).endswith('.yaml')]
+        if not abs_changed:
+            return self.snapshot()
+        # Partition: fragments vs top-level recipe files
+        recipes_dir_abs = os.path.abspath(self.recipes_dir)
+        frags_prefix = os.path.join(recipes_dir_abs, "_fragments") + os.sep
+        changed_fragments: Set[str] = set()
+        changed_recipe_files: Set[str] = set()
+        for p in abs_changed:
+            # If file no longer exists (deleted/renamed), fall back to full reload for safety
+            if not os.path.exists(p):
+                return self.ensure_loaded(force=True, reason=reason)
+            if p.startswith(frags_prefix):
+                changed_fragments.add(p)
+            else:
+                # If it's a new top-level file or an edited recipe file, do full reload to keep graphs correct
+                return self.ensure_loaded(force=True, reason=reason)
+        if not changed_fragments:
+            return self.snapshot()
+
+        # Build reverse includes map: fragment rel path -> set(recipe_file_abs)
+        rev_includes: Dict[str, Set[str]] = {}
+        for file_abs, incs in self._includes_by_file.items():
+            for rel in incs:
+                rev_includes.setdefault(rel, set()).add(file_abs)
+
+        # Compute impacted recipe files by mapping changed fragment abs path -> rel path used as key
+        impacted_recipe_files: Set[str] = set()
+        for frag_abs in changed_fragments:
+            try:
+                rel_posix = Path(frag_abs).resolve().relative_to(Path(recipes_dir_abs).resolve()).as_posix()
+            except Exception:
+                # If the fragment somehow escapes recipes dir, ignore
+                continue
+            for rf in rev_includes.get(rel_posix, set()):
+                impacted_recipe_files.add(rf)
+        if not impacted_recipe_files:
+            # No recipes include these fragments; nothing to do
+            return self.snapshot()
+
+        # Derive impacted ids and closure via extends graph
+        impacted_ids: Set[str] = set()
+        for f in impacted_recipe_files:
+            for rid in self._defines_by_file.get(f, []):
+                impacted_ids.add(rid)
+        # Closure over reverse extends: children that depend on impacted parents should be recompiled
+        queue = list(impacted_ids)
+        while queue:
+            cur = queue.pop(0)
+            for child in self._id_graph_rev.get(cur, set()):
+                if child not in impacted_ids:
+                    impacted_ids.add(child)
+                    queue.append(child)
+        if not impacted_ids:
+            return self.snapshot()
+
+        # Recompile only impacted ids in a safe topological order (restricted to impacted subgraph)
+        strict = os.getenv("VALIDATION_STRICT", "0") == "1"
+        errors: List[RecipeError] = []
+
+        # Topological order within impacted set
+        sub_indeg: Dict[str, int] = {n: 0 for n in impacted_ids}
+        for n in impacted_ids:
+            for p in self._id_graph.get(n, []):
+                if p in impacted_ids:
+                    sub_indeg[n] = sub_indeg.get(n, 0) + 1
+        queue2: List[str] = [n for n, d in sub_indeg.items() if d == 0]
+        visited: Set[str] = set()
+        order: List[str] = []
+        while queue2:
+            n = queue2.pop(0)
+            if n in visited:
+                continue
+            visited.add(n)
+            order.append(n)
+            for child in self._id_graph_rev.get(n, set()):
+                if child in sub_indeg:
+                    sub_indeg[child] = max(0, sub_indeg.get(child, 1) - 1)
+                    if sub_indeg.get(child, 0) == 0:
+                        queue2.append(child)
+        # If any impacted node still has indegree > 0 within subset, cycles exist; fall back to full reload
+        if any(d > 0 for d in sub_indeg.values()):
+            return self.ensure_loaded(force=True, reason=reason)
+
+        # Helper to read fragment (same as in ensure_loaded)
+        def read_fragment(rel: str, ref_file: str) -> Optional[Dict[str, Any]]:
+            abs_path = (Path(self.recipes_dir) / rel)
+            if not abs_path.exists():
+                errors.append(RecipeError(file_path=ref_file, error=f"include not found: {rel}", error_type="cross_file_validation", line_number=None))
+                return None
+            frag_data, perr = _parse_yaml(str(abs_path))
+            if perr is not None:
+                errors.append(perr)
+                return None
+            if not isinstance(frag_data, dict):
+                errors.append(RecipeError(file_path=str(abs_path), error="fragment YAML root must be a mapping", error_type="schema_validation", line_number=None))
+                return None
+            if not self._validate_fragment_schema(frag_data, str(abs_path), ref_file, errors):
+                return None
+            return frag_data
+
+        # Start from current compiled snapshot and update impacted ones
+        compiled_by_id = dict(self._compiled_by_id)
+        last_known_good = self._last_known_good_by_id
+
+        # Recompile in order
+        for rid in order:
+            file_path = self._id_to_file.get(rid)
+            if not file_path:
+                # Should not happen for known ids
+                continue
+            raw = self._raw_docs_by_file.get(file_path, {})
+            merged: Dict[str, Any] = {}
+            block_errors = False
+            # parents
+            for parent in self._id_graph.get(rid, []):
+                if parent in compiled_by_id:
+                    merged = self._deep_merge(merged, compiled_by_id[parent])
+                else:
+                    errors.append(RecipeError(file_path=file_path, error=f"missing parent id '{parent}'", error_type="cross_file_validation", line_number=None))
+                    if strict:
+                        block_errors = True
+            # includes
+            for rel in self._includes_by_file.get(file_path, []):
+                frag = read_fragment(rel, file_path)
+                if frag is None:
+                    if strict:
+                        block_errors = True
+                    continue
+                merged = self._deep_merge(merged, frag)
+            # self
+            merged = self._deep_merge(merged, {k: v for k, v in raw.items() if k not in ("include", "extends")})
+            self._apply_operators_plus(merged)
+            merged = self._apply_env_substitution(merged, file_path=file_path, rid=rid, strict=strict, collect_errors=errors)
+            # operator whitelist validation
+            allowed_ops = {"role_hdr", "constraints", "io_format", "examples", "quality_bar"}
+            ops_val = merged.get("operators", [])
+            if isinstance(ops_val, list):
+                for op in ops_val:
+                    if not isinstance(op, str) or op not in allowed_ops:
+                        errors.append(RecipeError(file_path=file_path, error=f"unknown operator '{op}'", error_type="schema_validation", line_number=None))
+                        if strict:
+                            block_errors = True
+
+            model_input = {
+                "id": merged.get("id"),
+                "assistant": merged.get("assistant"),
+                "category": merged.get("category"),
+                "operators": merged.get("operators", []),
+                "hparams": merged.get("hparams", {}),
+                "guards": merged.get("guards", {}),
+                "examples": merged.get("examples", []),
+            }
+            # id prefix consistency (same as ensure_loaded)
+            id_val = model_input.get("id")
+            asst = model_input.get("assistant")
+            cat = model_input.get("category")
+            if isinstance(id_val, str) and id_val.count(".") >= 2:
+                parts = id_val.split(".")
+                known_assistants = {"chatgpt", "claude", "gemini", "deepseek"}
+                known_categories = {"coding", "science", "psychology", "law", "politics"}
+                if parts[0] in known_assistants and parts[1] in known_categories:
+                    if parts[0] != asst or parts[1] != cat:
+                        errors.append(RecipeError(file_path=file_path, error=f"assistant/category fields must match id prefix: {id_val}", error_type="semantic_validation", line_number=None))
+                        if strict:
+                            block_errors = True
+            # extends assistant/category compatibility
+            for parent in self._id_graph.get(rid, []):
+                pfile = self._id_to_file.get(parent)
+                if pfile and parent in compiled_by_id:
+                    p = compiled_by_id[parent]
+                    pa, pc = p.get("assistant"), p.get("category")
+                    if pa and pc and (pa != asst or pc != cat):
+                        errors.append(RecipeError(file_path=file_path, error=f"extends parent '{parent}' assistant/category mismatch", error_type="cross_file_validation", line_number=None))
+                        if strict:
+                            block_errors = True
+            try:
+                model = RecipeModel(**model_input)
+            except ValidationError as e:
+                errors.append(RecipeError(file_path=file_path, error=str(e), error_type="schema_validation", line_number=None))
+                continue
+            # examples file refs validation (same as ensure_loaded)
+            for ex in list(model.examples or []):
+                if isinstance(ex, str) and ("/" in ex or ex.startswith("./") or ex.endswith((".txt", ".md", ".yaml", ".yml"))):
+                    abs_ex = (Path(self.recipes_dir) / ex).resolve()
+                    try:
+                        abs_ex.relative_to(Path(self.recipes_dir).resolve())
+                    except Exception:
+                        errors.append(RecipeError(file_path=file_path, error=f"examples reference escapes recipes/: {ex}", error_type="cross_file_validation", line_number=None))
+                        if strict:
+                            block_errors = True
+                        continue
+                    if not abs_ex.exists():
+                        errors.append(RecipeError(file_path=file_path, error=f"examples reference not found: {ex}", error_type="cross_file_validation", line_number=None))
+                        if strict:
+                            block_errors = True
+            # semantics
+            for msg in validate_recipe(model):
+                errors.append(RecipeError(file_path=file_path, error=msg, error_type="semantic_validation", line_number=None))
+                if strict:
+                    block_errors = True
+
+            if block_errors:
+                # Keep last-known-good if available and not strict; in strict mode it's excluded from models
+                if not strict and rid in last_known_good:
+                    compiled_by_id[rid] = last_known_good[rid]
+                # else leave compiled_by_id as-is (might keep old compiled or none)
+                continue
+            else:
+                compiled_by_id[rid] = model_input
+                last_known_good[rid] = model_input
+
+        # Update compiled state
+        self._compiled_by_id = compiled_by_id
+        # Update models list by replacing impacted ids
+        id_to_model: Dict[str, RecipeModel] = {m.id: m for m in self._recipes}
+        for rid in impacted_ids:
+            data = self._compiled_by_id.get(rid)
+            if not data:
+                continue
+            try:
+                id_to_model[rid] = RecipeModel(**data)
+            except Exception:
+                pass
+        # Rebuild recipes list preserving original order; append any new ids at end
+        old_order = [m.id for m in self._recipes]
+        new_list: List[RecipeModel] = []
+        seen_ids: Set[str] = set()
+        for rid in old_order:
+            if rid in id_to_model:
+                new_list.append(id_to_model[rid])
+                seen_ids.add(rid)
+        for rid, data in self._compiled_by_id.items():
+            if rid not in seen_ids:
+                try:
+                    new_list.append(RecipeModel(**data))
+                    seen_ids.add(rid)
+                except Exception:
+                    pass
+        self._recipes = new_list
+
+        # Update mtimes for changed fragments (best-effort; we don't track mtimes for fragments, so leave _mtimes as-is)
+
+        # Recompute errors list by removing those tied to impacted files or changed fragments
+        impacted_file_set = set(impacted_recipe_files) | set(changed_fragments)
+        preserved_errors: List[RecipeError] = [e for e in self._errors if e.file_path not in impacted_file_set]
+        self._errors = preserved_errors + errors
+        self._last_loaded_ns = time.time_ns()
+        return self.snapshot()
+
     def _need_reload(self) -> bool:
         files = self._scan_files()
         changed = False
@@ -236,6 +536,9 @@ class RecipesCache:
 
     def _apply_env_substitution(self, obj: Any, file_path: str, rid: Optional[str], strict: bool, collect_errors: List[RecipeError]) -> Any:
         def subst(s: str) -> str:
+            # Support both ${VAR} (whitelist) and ${ENV:VAR:-default} (policy lists)
+            # First, apply allow/deny policy form
+            s2 = _subst_env_str(s, collect_errors, file_path)
             def repl(m: re.Match[str]) -> str:
                 var = m.group(1)
                 if var not in self._env_whitelist:
@@ -247,7 +550,7 @@ class RecipesCache:
                     collect_errors.append(RecipeError(file_path=file_path, error=f"ENV var {var} not set for recipe {rid or ''}", error_type="semantic_validation", line_number=None))
                     return m.group(0)
                 return str(val)
-            return self._ENV_RE.sub(repl, s)
+            return self._ENV_RE.sub(repl, s2)
         if isinstance(obj, str):
             return subst(obj)
         if isinstance(obj, list):
