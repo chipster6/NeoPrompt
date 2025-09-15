@@ -18,7 +18,7 @@ export default function App() {
   const [recipes, setRecipes] = useState<any[]>([])
   const [loading, setLoading] = useState(false)
   const [settingsOpen, setSettingsOpen] = useState(false)
-  const [settingsOpen, setSettingsOpen] = useState(false)
+  const [statsOpen, setStatsOpen] = useState(false)
   const [storeText, setStoreText] = useState<boolean>(() => {
     const v = localStorage.getItem('store_text')
     return v === '1'
@@ -28,6 +28,8 @@ export default function App() {
     const n = v ? Number(v) : 0
     return Number.isFinite(n) ? n : 0
   })
+  // UI indicator: if user requests enhancement but backend enhancer is disabled, show a subtle badge
+  const [serverEnhancerOff, setServerEnhancerOff] = useState(false)
 
   useEffect(() => {
     apiRecipes()
@@ -58,6 +60,9 @@ export default function App() {
         context_features: { store_text: storeText },
       })
       setResult(res)
+      // If user asked for enhance but backend did not enhance, surface a subtle indicator
+      const enhanced = Array.isArray(res?.notes) && res.notes.includes('enhanced=true')
+      setServerEnhancerOff(!!enhance && !enhanced)
       showToast('Prompt generated', 'success')
     } catch (e: any) {
       showToast(e?.message || 'Failed to generate', 'error')
@@ -120,7 +125,18 @@ export default function App() {
             <option value="politics">Politics</option>
           </select>
           <label className="flex items-center gap-2">
-            <input type="checkbox" checked={enhance} onChange={(e) => setEnhance(e.target.checked)} /> Enhance
+            <input type="checkbox" checked={enhance} onChange={(e) => setEnhance(e.target.checked)} />
+            <span>
+              Enhance
+              {serverEnhancerOff && (
+                <span
+                  className="ml-2 text-xs text-neutral-400 align-middle"
+                  title="Backend enhancer is disabled (ENHANCER_ENABLED=false). Toggle has no effect."
+                >
+                  (server off)
+                </span>
+              )}
+            </span>
           </label>
           <label className="flex items-center gap-2">
             <input type="checkbox" checked={forceJson} onChange={(e) => setForceJson(e.target.checked)} /> Force JSON
