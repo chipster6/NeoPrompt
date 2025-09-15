@@ -84,13 +84,29 @@ class RecipeValidationError(BaseModel):
     file_path: str
     error: str
     line_number: Optional[int] = None
-    error_type: Optional[str] = None
+    error_type: Optional[str] = None  # yaml_parse | schema_validation | semantic_validation | cross_file_validation
     severity: Optional[str] = None  # 'error' | 'warning'
+
+
+class RecipesDepsById(BaseModel):
+    extends: List[str] = Field(default_factory=list)
+    includes: List[str] = Field(default_factory=list)
+
+
+class RecipesDepsByFile(BaseModel):
+    includes: List[str] = Field(default_factory=list)
+    defines: List[str] = Field(default_factory=list)
+
+
+class RecipesDeps(BaseModel):
+    by_id: Dict[str, RecipesDepsById] = Field(default_factory=dict)
+    by_file: Dict[str, RecipesDepsByFile] = Field(default_factory=dict)
 
 
 class RecipesResponse(BaseModel):
     recipes: List[Recipe]
     errors: List[RecipeValidationError]
+    deps: Optional[RecipesDeps] = None
 
 
 # Internal data models

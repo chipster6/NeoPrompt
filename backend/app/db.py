@@ -3,9 +3,8 @@ import os
 import json
 from datetime import datetime
 from typing import Dict, Any, Optional
-from sqlalchemy import create_engine, Column, String, DateTime, Float, Text, Integer, ForeignKey
-from sqlalchemy.ext.declarative import declarative_base
-from sqlalchemy.orm import sessionmaker, Session, relationship
+from sqlalchemy import create_engine, Column, String, DateTime, Float, Text, Integer, ForeignKey, UniqueConstraint, Index
+from sqlalchemy.orm import sessionmaker, Session, relationship, declarative_base
 from sqlalchemy.dialects.sqlite import JSON as SQLiteJSON
 
 
@@ -88,6 +87,34 @@ class Feedback(Base):
     def set_safety_flags_list(self, flags_list: list):
         """Set safety flags from list."""
         self.safety_flags = json.dumps(flags_list)
+
+
+class BanditStats(Base):
+    """Persistent sufficient statistics per (assistant, category, recipe_id)."""
+    __tablename__ = "bandit_stats"
+
+    __table_args__ = (
+        UniqueConstraint("assistant", "category", "recipe_id", name="uq_bandit_stats_group_recipe"),
+        Index("ix_bandit_stats_group", "assistant", "category"),
+    )
+
+    # Composite key via unique constraint; use integer surrogate PK for simplicity
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    assistant = Column(String, nullable=False, index=True)
+    category = Column(String, nullable=False, index=True)
+    recipe_id = Column(String, nullable=False, index=True)
+
+    sample_count = Column(Integer, nullable=False, default=0)
+    reward_sum = Column(Float, nullable=False, default=0.0)
+    explore_count = Column(Integer, nullable=False, default=0)
+    exploit_count = Column(Integer, nullable=False, default=0)
+
+    first_seen_at = Column(DateTime, default=datetime.utcnow, nullable=False)
+    updated_at = Column(DateTime, default=datetime.utcnow, nullable=False)
+
+
+# Simple helper to enforce uniqueness via (assistant, category, recipe_id)
+# SQLite will not enforce this unless we create the index during migration; for v1 we rely on app logic.
 
 
 def get_db() -> Session:

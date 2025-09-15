@@ -41,8 +41,10 @@ export async function apiHistory(params: { limit?: number; assistant?: string; c
   return res.json();
 }
 
-export async function apiRecipes() {
-  const res = await fetch(`${API_BASE}/recipes`);
+export async function apiRecipes(reload?: boolean) {
+  const url = new URL(`${API_BASE}/recipes`);
+  if (reload) url.searchParams.set('reload', '1');
+  const res = await fetch(url.toString());
   if (!res.ok) throw new Error('Recipes failed');
   return res.json();
 }
