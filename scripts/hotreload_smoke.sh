@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 API=${API:-http://127.0.0.1:7070}
-RECIPES_DIR=${RECIPES_DIR:-"recipes"}
+RECIPES_DIR=${RECIPES_DIR:-"prompt-templates"}
 
 info() { printf "\033[1;34m==> %s\033[0m\n" "$*"; }
 
