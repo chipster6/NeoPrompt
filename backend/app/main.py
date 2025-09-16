@@ -31,8 +31,13 @@ from .guardrails import apply_domain_caps, sanitize_text
 from . import metrics  # ensure metrics is imported for endpoints that reference it
 from .bandit import BanditService, BanditConfig
 
-# Default directory renamed to prompt-templates; env var name stays RECIPES_DIR for backward compatibility (Phase A).
-RECIPES_DIR = os.getenv("RECIPES_DIR", os.path.abspath(os.path.join(os.path.dirname(__file__), "../../prompt-templates")))
+# Phase B: allow PROMPT_TEMPLATES_DIR to override RECIPES_DIR; default to repo prompt-templates directory.
+_DEFAULT_PROMPT_TEMPLATES_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), "../../prompt-templates"))
+RECIPES_DIR = (
+    os.getenv("PROMPT_TEMPLATES_DIR")
+    or os.getenv("RECIPES_DIR")
+    or _DEFAULT_PROMPT_TEMPLATES_DIR
+)
 STORE_TEXT = os.getenv("STORE_TEXT", "0") == "1"
 ENHANCER_ENABLED = os.getenv("ENHANCER_ENABLED", "0") == "1"
 DEFAULT_EPSILON = float(os.getenv("EPSILON", "0.10"))
@@ -392,6 +397,15 @@ def recipes(reload: bool = False, deps: bool = False):
         return result
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"recipes_failed: {type(e).__name__}")
+
+
+# Alias endpoint: returns the same payload as /recipes
+@app.get("/prompt-templates", response_model=RecipesResponse)
+def prompt_templates(reload: bool = False, deps: bool = False):
+    try:
+        return recipes(reload=reload, deps=deps)
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"prompt_templates_failed: {type(e).__name__}")
 
 
 @app.get("/diagnostics")

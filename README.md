@@ -26,6 +26,7 @@ Backend (FastAPI, Python 3.12)
   ├─ /feedback    -> record reward components + aggregate reward
   ├─ /history     -> list recent decisions (with/without text)
   ├─ /recipes     -> list recipes and validation errors
+  ├─ /prompt-templates -> alias of /recipes (Phase B, read-only)
   ├─ engine.py    -> deterministic operators
   ├─ optimizer.py -> ε-greedy scorer per assistant×category
   ├─ enhancer.py  -> optional local/hosted LLM rewriter
@@ -85,7 +86,8 @@ npm run dev
 Environment variables and defaults
 
 - Core
-  - RECIPES_DIR: Path to recipes directory (default backend/app/../../recipes)
+  - RECIPES_DIR: Path to prompt templates directory (default backend/app/../../prompt-templates)
+  - PROMPT_TEMPLATES_DIR: Optional alias for RECIPES_DIR; if set, it takes precedence (preferred going forward)
   - LOG_LEVEL: Logging level (default INFO)
   - DATABASE_URL: SQLAlchemy database URL (default sqlite:///./console.sqlite)
   - STORE_TEXT: 1 to store raw/engineered text with decisions; 0 to disable (default 0)
@@ -124,7 +126,7 @@ Hot-reload modes and env vars
 - RECIPES_RELOAD_INTERVAL_SECONDS: polling interval in seconds (default: 5)
 - RECIPES_DEBOUNCE_MS: debounce window for filesystem events in ms (default: 300)
 - RECIPES_RECURSIVE: watch `recipes/**/*.yaml` recursively when set to 1 (default: 0)
-- RECIPES_DIR: override recipes directory (default: repo recipes/)
+- RECIPES_DIR: override prompt templates directory (default: repo prompt-templates/)
 
 Force reload
 ```bash
