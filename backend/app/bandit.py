@@ -1,13 +1,14 @@
 """Bandit repository, ε-greedy selector, and service integration.
 
-Implements a persistent stats store backed by BanditStats, with a repository facade
-and a simple ε-greedy selector that supports:
-- cold start handling via min_initial_samples
-- optimistic initial value for unseen recipes
-- random tie-breaking for equal averages
-- counting explore vs exploit selections
-- small in-process TTL cache for stats
-- Prometheus metrics for selection/feedback and latency
+Provides a persistent stats store backed by :class:`BanditStats` along with helpers
+for an ε-greedy policy. The selector supports:
+
+* cold start handling via ``min_initial_samples``
+* an optimistic initial value for unseen recipes
+* random tie-breaking for equal averages
+* accounting of explore vs exploit selections
+* a small in-process TTL cache for stats
+* Prometheus metrics for selection and feedback latency
 """
 from __future__ import annotations
 import random
