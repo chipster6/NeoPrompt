@@ -19,7 +19,7 @@ Frontend (React + Vite + Tailwind)
   ├─ Toolbar (Assistant, Category, Enhance toggle)
   ├─ Output Panel (Engineered Prompt + Copy, feedback buttons)
   ├─ History Panel (filters/search)
-  └─ Settings (recipes viewer/hot-reload)
+  └─ Settings (prompt templates viewer/hot-reload)
 
 Backend (FastAPI, Python 3.12)
   ├─ /choose      -> select recipe, (optional) enhance input, build engineered prompt
@@ -61,7 +61,7 @@ uvicorn app.main:app --reload --port 7070
 Logging
 - Set LOG_LEVEL=DEBUG to increase verbosity.
 
-Recipes cache
+Prompt templates cache (a.k.a. recipes)
 - Cached in-memory; GET /recipes?reload=true forces a refresh.
 
 Testing
@@ -71,7 +71,7 @@ pytest -q || python -m pytest -q
 ```
 
 Scripts
-- scripts/curl-examples.sh contains example curl commands for local verification.
+- scripts/curl-examples.sh contains example curl commands for local verification of /recipes (alias: /prompt-templates).
 
 ### Frontend
 ```bash

@@ -1,10 +1,10 @@
-# Authoring NeoPrompt Recipes
+# Authoring Prompt Templates (Recipes)
 
-This guide shows how to create and maintain recipes.
+This guide shows how to create and maintain prompt templates (formerly called "recipes").
 
 ## File layout
-- Main recipes live under `recipes/`.
-- Reusable fragments live under `recipes/_fragments/`.
+- Main prompt templates live under `prompt-templates/`.
+- Reusable fragments live under `prompt-templates/_fragments/`.
 
 ## Minimal recipe
 ```yaml
