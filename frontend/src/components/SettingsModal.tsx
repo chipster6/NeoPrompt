@@ -78,16 +78,16 @@ export default function SettingsModal({ open, onClose, storeText, onToggleStoreT
 
           <div className="flex items-center gap-2">
             <button onClick={refresh} className="bg-green-700 hover:bg-green-600 px-3 py-1 rounded disabled:opacity-50" disabled={loading}>
-              {loading ? 'Reloading…' : 'Reload Recipes'}
+              {loading ? 'Reloading…' : 'Reload Prompt Templates'}
             </button>
             {error && <span className="text-red-400 text-sm">{error}</span>}
           </div>
 
-          <div className="text-green-400">Loaded Recipes & Validation</div>
+          <div className="text-green-400">Loaded Prompt Templates & Validation</div>
 
           {recipes && (
             <div className="text-sm text-neutral-300 flex items-center gap-3">
-              <span>Recipes: <span className="text-green-400">{recipes.recipes?.length ?? 0}</span></span>
+              <span>Prompt Templates: <span className="text-green-400">{recipes.recipes?.length ?? 0}</span></span>
               <span>Diagnostics: <span className="text-green-400">{recipes.errors?.length ?? 0}</span></span>
             </div>
           )}
