@@ -1,7 +1,7 @@
 """SQLAlchemy models and database initialization."""
 import os
 import json
-from datetime import datetime
+from datetime import datetime, UTC
 from typing import Dict, Any, Optional
 from sqlalchemy import create_engine, Column, String, DateTime, Float, Text, Integer, ForeignKey, UniqueConstraint, Index
 from sqlalchemy.orm import sessionmaker, Session, relationship, declarative_base
@@ -20,7 +20,7 @@ class Decision(Base):
     __tablename__ = "decisions"
 
     id = Column(String, primary_key=True)
-    ts = Column(DateTime, default=datetime.utcnow, nullable=False)
+    ts = Column(DateTime(timezone=True), default=lambda: datetime.now(UTC), nullable=False)
     assistant = Column(String, nullable=False, index=True)
     category = Column(String, nullable=False, index=True)
     context = Column(Text, nullable=False)  # JSON string
@@ -64,7 +64,7 @@ class Feedback(Base):
     __tablename__ = "feedback"
 
     decision_id = Column(String, ForeignKey("decisions.id"), primary_key=True)
-    ts = Column(DateTime, default=datetime.utcnow, nullable=False)
+    ts = Column(DateTime(timezone=True), default=lambda: datetime.now(UTC), nullable=False)
     reward = Column(Float, nullable=False)
     components = Column(Text, nullable=False)  # JSON string of reward components
     safety_flags = Column(Text, nullable=False)  # JSON list of safety flags
@@ -109,8 +109,8 @@ class BanditStats(Base):
     explore_count = Column(Integer, nullable=False, default=0)
     exploit_count = Column(Integer, nullable=False, default=0)
 
-    first_seen_at = Column(DateTime, default=datetime.utcnow, nullable=False)
-    updated_at = Column(DateTime, default=datetime.utcnow, nullable=False)
+    first_seen_at = Column(DateTime(timezone=True), default=lambda: datetime.now(UTC), nullable=False)
+    updated_at = Column(DateTime(timezone=True), default=lambda: datetime.now(UTC), nullable=False)
 
 
 # Simple helper to enforce uniqueness via (assistant, category, recipe_id)

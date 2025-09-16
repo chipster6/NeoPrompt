@@ -13,7 +13,7 @@ from __future__ import annotations
 import random
 from dataclasses import dataclass
 from typing import Dict, List, Optional, Tuple
-from datetime import datetime
+from datetime import datetime, UTC
 import logging
 import time
 
@@ -69,8 +69,8 @@ class BanditStatsRepository:
                 reward_sum=0.0,
                 explore_count=0,
                 exploit_count=0,
-                first_seen_at=datetime.utcnow(),
-                updated_at=datetime.utcnow(),
+                first_seen_at=datetime.now(UTC),
+                updated_at=datetime.now(UTC),
             )
             db.add(row)
         return row
@@ -81,13 +81,13 @@ class BanditStatsRepository:
             row.explore_count = int(row.explore_count or 0) + 1
         else:
             row.exploit_count = int(row.exploit_count or 0) + 1
-        row.updated_at = datetime.utcnow()
+        row.updated_at = datetime.now(UTC)
 
     def upsert_feedback(self, db: Session, assistant: str, category: str, recipe_id: str, reward: float) -> None:
         row = self._get_or_create(db, assistant, category, recipe_id)
         row.sample_count = int(row.sample_count or 0) + 1
         row.reward_sum = float(row.reward_sum or 0.0) + float(reward)
-        row.updated_at = datetime.utcnow()
+        row.updated_at = datetime.now(UTC)
 
 
 def _average_for(recipe_id: str, stats: Dict[str, Dict[str, float]], optimistic: float) -> float:

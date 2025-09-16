@@ -10,6 +10,7 @@ from typing import List, Optional, Iterable
 from fastapi import FastAPI, Depends, Query, HTTPException, Body
 from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy.orm import Session
+from contextlib import asynccontextmanager
 
 from .schemas import (
     ChooseRequest,
@@ -126,9 +127,10 @@ async def _recipes_watch_loop():
             await asyncio.sleep(interval)
 
 
-# Initialize DB and watcher on startup
-@app.on_event("startup")
-def on_startup():
+# Lifespan handler replacing deprecated on_event startup/shutdown
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    # Startup
     init_db()
     app.state.epsilon = DEFAULT_EPSILON
     # Publish epsilon gauge
@@ -169,6 +171,21 @@ def on_startup():
         app.state.recipes_reload_task = asyncio.create_task(_recipes_watch_loop())
     except Exception as e:
         logger.exception("failed_to_start_recipes_watch_loop: %s", e)
+
+    # Yield control to run the app
+    yield
+
+    # Shutdown
+    task = getattr(app.state, "recipes_reload_task", None)
+    if task is not None:
+        task.cancel()
+        try:
+            await task
+        except Exception:
+            pass
+
+# Register lifespan context
+app.router.lifespan_context = lifespan
 
 
 # Recipes cache: serve last-known-good; allow force reload via flag
@@ -594,14 +611,4 @@ def update_stats(
         raise HTTPException(status_code=500, detail=f"stats_update_failed: {type(e).__name__}")
 
 
-@app.on_event("shutdown")
-async def on_shutdown():
-    # Cancel background reloader task if running
-    task = getattr(app.state, "recipes_reload_task", None)
-    if task is not None:
-        task.cancel()
-        try:
-            await task
-        except Exception:
-            pass
 
