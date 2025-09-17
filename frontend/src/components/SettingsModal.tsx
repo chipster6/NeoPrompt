@@ -14,6 +14,8 @@ export default function SettingsModal({ open, onClose, storeText, onToggleStoreT
   const [loading, setLoading] = useState(false)
   const [recipes, setRecipes] = useState<any>(null)
   const [error, setError] = useState<string | null>(null)
+  const [severityFilter, setSeverityFilter] = useState<'all' | 'error' | 'warning'>('all')
+  const [pathQuery, setPathQuery] = useState('')
 
   useEffect(() => {
     if (!open) return
