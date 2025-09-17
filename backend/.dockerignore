@@ -1,0 +1,26 @@
+__pycache__
+*.pyc
+*.pyo
+*.pyd
+*.so
+*.dll
+*.dylib
+*.log
+.env
+.venv
+.DS_Store
+.mypy_cache
+.pytest_cache
+.coverage
+htmlcov
+build
+.eggs
+dist
+
+# Node bits copied into API image during multi-stage builds are handled at root .dockerignore
+# Ensure backend context excludes frontend assets and VCS noise
+../.git
+../frontend
+../node_modules
+../frontend/node_modules
+../frontend/dist
