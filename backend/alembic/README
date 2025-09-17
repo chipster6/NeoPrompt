@@ -1,0 +1,2 @@
+Alembic migrations for NeoPrompt backend.
+Run from backend/ directory with a proper DATABASE_URL environment variable set.
