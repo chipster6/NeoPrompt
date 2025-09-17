@@ -31,6 +31,7 @@ from .enhancer import Enhancer
 from .guardrails import apply_domain_caps, sanitize_text
 from . import metrics  # ensure metrics is imported for endpoints that reference it
 from .bandit import BanditService, BanditConfig
+from .logging_config import configure_logging
 
 # Phase B: allow PROMPT_TEMPLATES_DIR to override RECIPES_DIR; default to repo prompt-templates directory.
 _DEFAULT_PROMPT_TEMPLATES_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), "../../prompt-templates"))
@@ -59,16 +60,25 @@ try:
 except Exception:  # pragma: no cover - optional dependency
     awatch = None  # type: ignore
 
-# Logging configuration
+# Logging configuration (structured JSON)
 LOG_LEVEL = os.getenv("LOG_LEVEL", "INFO").upper()
-logging.basicConfig(level=getattr(logging, LOG_LEVEL, logging.INFO))
+configure_logging(LOG_LEVEL)
 logger = logging.getLogger("prompt_console")
 
 app = FastAPI(title="Prompt Console API", version="0.1.0")
 app.state.recipes_cache = RecipesCache(RECIPES_DIR)
+
+# CORS policy driven by environment
+_ENV = os.getenv("ENV", "dev").lower()
+_origins_env = os.getenv("CORS_ALLOW_ORIGINS", "").strip()
+if _ENV == "dev" and not _origins_env:
+    cors_origins = ["*"]  # wildcard in dev when unset
+else:
+    cors_origins = [o.strip() for o in _origins_env.split(",") if o.strip()] or ["http://localhost"]
+
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    allow_origins=cors_origins,
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -138,6 +148,20 @@ async def lifespan(app: FastAPI):
     # Startup
     init_db()
     app.state.epsilon = DEFAULT_EPSILON
+    # Optional rate-limit stub middleware (no-op in M0)
+    try:
+        if os.getenv("RATE_LIMIT_ENABLED", "false").lower() == "true":
+            from .middleware.rate_limit_stub import RateLimitStubMiddleware
+            app.add_middleware(RateLimitStubMiddleware)
+            logger.info("rate_limit_stub_enabled=true")
+    except Exception:
+        pass
+    # Publish epsilon gauge
+    if os.getenv("RATE_LIMIT_ENABLED", "false").lower() == "true":
+        try:
+            logger.info("rate_limit_stub_enabled=true")
+        except Exception:
+            pass
     # Publish epsilon gauge
     try:
         metrics.set_epsilon_gauge(app.state.epsilon)
@@ -380,6 +404,12 @@ def history(
 @app.get("/recipes", response_model=RecipesResponse)
 def recipes(reload: bool = False, deps: bool = False):
     try:
+        # Deprecation notice for legacy path (canonical: /prompt-templates)
+        if os.getenv("LOG_DEPRECATIONS", "true").lower() == "true":
+            try:
+                logger.warning("DEPRECATED: /recipes hit; use /prompt-templates instead")
+            except Exception:
+                pass
         recipes, errors = _load_recipe_cache(force=bool(reload))
         # Convert to API schema and include validation issues
         api_recipes: list[RecipeSchema] = []
@@ -428,6 +458,26 @@ def prompt_templates(reload: bool = False, deps: bool = False):
         return recipes(reload=reload, deps=deps)
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"prompt_templates_failed: {type(e).__name__}")
+
+
+# Expose JSON Schema for prompt templates (editor integration)
+@app.get("/prompt-templates/schema")
+def prompt_templates_schema():
+    try:
+        from pathlib import Path
+        # Prefer new filename; fallback to legacy if needed
+        root = Path(__file__).resolve().parents[2]
+        new_path = root / "docs" / "prompt_template.schema.json"
+        legacy_path = root / "docs" / "recipe.schema.json"
+        p = new_path if new_path.exists() else legacy_path
+        if not p.exists():
+            raise HTTPException(status_code=404, detail="schema_not_found")
+        import json
+        return json.loads(p.read_text(encoding="utf-8"))
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"schema_failed: {type(e).__name__}")
 
 
 @app.get("/diagnostics")
