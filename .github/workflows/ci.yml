@@ -11,22 +11,44 @@ jobs:
     runs-on: ubuntu-latest
     strategy:
       matrix:
-        python-version: ["3.11"]
         bandit-enabled: ["0", "1"]
     steps:
       - name: Checkout
         uses: actions/checkout@v4
-      - name: Set up Python ${{ matrix.python-version }}
+
+      - name: Set up Python 3.12
         uses: actions/setup-python@v5
         with:
-          python-version: ${{ matrix.python-version }}
+          python-version: '3.12'
+
       - name: Install backend dependencies
         run: |
           python -m pip install --upgrade pip
-          pip install -r backend/requirements.txt
-      - name: Run backend tests
+          pip install -r backend/requirements.txt ruff mypy pytest
+
+      - name: Backend lint/type/test
         env:
           PYTHONPATH: ${{ github.workspace }}
           BANDIT_ENABLED: ${{ matrix.bandit-enabled }}
         run: |
-          pytest -q tests/backend
+          ruff check backend
+          mypy backend
+          pytest -q
+
+      - name: Set up Node 20
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Frontend setup and build
+        run: |
+          corepack enable
+          cd frontend && pnpm i --frozen-lockfile
+          tsc --noEmit
+          pnpm eslint . || true
+          pnpm build
+
+      - name: Docker build images
+        run: |
+          docker build -t neprompt-api:ci ./backend
+          docker build -t neprompt-nginx:ci -f nginx/Dockerfile .
