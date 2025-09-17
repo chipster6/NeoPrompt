@@ -74,6 +74,11 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+# Health check endpoint for container and proxy health
+@app.get("/healthz")
+def healthz():
+    return {"ok": True}
+
 
 async def _recipes_watch_loop():
     """Background task to watch recipes directory and trigger reloads."""
