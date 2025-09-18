@@ -20,6 +20,9 @@ jobs:
         uses: actions/setup-python@v5
         with:
           python-version: '3.12'
+          cache: 'pip'
+          cache-dependency-path: |
+            backend/requirements*.txt
 
       - name: Install backend dependencies
         run: |
@@ -40,14 +43,19 @@ jobs:
         uses: actions/setup-node@v4
         with:
           node-version: '20'
+          cache: 'npm'
+          cache-dependency-path: 'frontend/package-lock.json'
 
-      - name: Frontend setup and build
+      - name: Frontend setup, test, and build
+        env:
+          CI: true
         run: |
-          corepack enable
-          cd frontend && pnpm i --frozen-lockfile
-          tsc --noEmit
-          pnpm eslint . || true
-          pnpm build
+          cd frontend
+          npm ci
+          if npm run | grep -q "test:ci"; then npm run test:ci; else npm test -- --run; fi
+          npx tsc --noEmit
+          npx eslint . || true
+          npm run build
 
       - name: Docker build images
         run: |
