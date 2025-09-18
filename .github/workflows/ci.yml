@@ -29,10 +29,11 @@ jobs:
       - name: Backend lint/type/test
         env:
           PYTHONPATH: ${{ github.workspace }}
+          MYPYPATH: ${{ github.workspace }}
           BANDIT_ENABLED: ${{ matrix.bandit-enabled }}
         run: |
           ruff check backend
-          mypy backend
+          mypy -p backend
           pytest -q
 
       - name: Set up Node 20
