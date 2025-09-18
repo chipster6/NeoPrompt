@@ -2,7 +2,6 @@
 from datetime import datetime
 from typing import Dict, List, Any, Optional
 from pydantic import BaseModel, Field
-import uuid
 
 
 # Request schemas

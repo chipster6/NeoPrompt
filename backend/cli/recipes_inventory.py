@@ -8,9 +8,6 @@ from backend.app.recipes import RecipesCache, RecipeModel
 
 
 def compute_coverage(recipes: List[RecipeModel]):
-    assistants = sorted(set(r.assistant for r in recipes))
-    categories = sorted(set(r.category for r in recipes))
-
     # Expected enums based on current design
     expected_assistants = ["chatgpt", "claude", "deepseek", "gemini"]
     expected_categories = ["coding", "law", "politics", "psychology", "science"]

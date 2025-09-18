@@ -6,8 +6,6 @@ Create Date: 2025-09-17
 
 """
 from __future__ import annotations
-from alembic import op
-import sqlalchemy as sa
 
 # revision identifiers, used by Alembic.
 revision = "0001_baseline"

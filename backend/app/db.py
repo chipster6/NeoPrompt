@@ -2,10 +2,9 @@
 import os
 import json
 from datetime import datetime, UTC
-from typing import Dict, Any, Optional
+from typing import Dict, Any
 from sqlalchemy import create_engine, Column, String, DateTime, Float, Text, Integer, ForeignKey, UniqueConstraint, Index
 from sqlalchemy.orm import sessionmaker, Session, relationship, declarative_base
-from sqlalchemy.dialects.sqlite import JSON as SQLiteJSON
 
 
 # Database configuration

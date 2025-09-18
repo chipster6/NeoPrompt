@@ -3,6 +3,7 @@ import os
 from logging.config import fileConfig
 from sqlalchemy import engine_from_config, pool
 from alembic import context
+from app.db import Base  # type: ignore
 
 # Interpret the config file for Python logging.
 config = context.config
@@ -10,7 +11,6 @@ if config.config_file_name is not None:
     fileConfig(config.config_file_name)
 
 # Provide access to target metadata
-from app.db import Base  # type: ignore
 
 target_metadata = Base.metadata
 

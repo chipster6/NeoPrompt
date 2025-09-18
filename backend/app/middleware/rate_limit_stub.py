@@ -1,6 +1,5 @@
 from __future__ import annotations
 from typing import Callable
-from fastapi import Request
 
 class RateLimitStubMiddleware:
     """No-op rate limit stub for M0.
