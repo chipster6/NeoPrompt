@@ -1,9 +1,12 @@
 from __future__ import annotations
 import os
 from logging.config import fileConfig
+from typing import Any, cast
+
 from sqlalchemy import engine_from_config, pool
+
 from alembic import context
-from app.db import Base  # type: ignore
+from app.db import Base
 
 # Interpret the config file for Python logging.
 config = context.config
@@ -29,8 +32,17 @@ def run_migrations_offline() -> None:
 
 
 def run_migrations_online() -> None:
+    section = config.get_section(config.config_ini_section)
+    if section is None:
+        raise RuntimeError(
+            "Missing config section for SQLAlchemy migrations: "
+            f"{config.config_ini_section!r}"
+        )
+
+    section_config = cast(dict[str, Any], dict(section))
+
     connectable = engine_from_config(
-        config.get_section(config.config_ini_section),
+        section_config,
         prefix="sqlalchemy.",
         poolclass=pool.NullPool,
     )
