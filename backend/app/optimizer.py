@@ -6,6 +6,7 @@ import random
 from typing import List, Tuple, Dict, Optional
 from sqlalchemy.orm import Session
 from sqlalchemy import func
+from sqlalchemy.exc import OperationalError, ProgrammingError
 
 from .db import Decision, Feedback
 from .recipes import RecipeModel
@@ -20,7 +21,12 @@ def _fetch_recipe_stats(db: Session, assistant: str, category: str) -> Dict[str,
         .group_by(Decision.recipe_id)
     )
     stats: Dict[str, Dict[str, float]] = {}
-    for recipe_id, avg_reward, count in q.all():
+    try:
+        rows = q.all()
+    except (OperationalError, ProgrammingError):
+        db.rollback()
+        return stats
+    for recipe_id, avg_reward, count in rows:
         stats[recipe_id] = {"mean_reward": float(avg_reward or 0.0), "count": float(count or 0)}
     return stats
 
@@ -71,7 +77,12 @@ def _last_n_rewards(db: Session, recipe_id: str, n: int = 3) -> List[float]:
         .order_by(Feedback.ts.desc())
         .limit(n)
     )
-    return [float(r[0]) for r in q.all()]
+    try:
+        rows = q.all()
+    except (OperationalError, ProgrammingError):
+        db.rollback()
+        return []
+    return [float(r[0]) for r in rows]
 
 
 def _eligible(recipes: List[RecipeModel], db: Session, safety_threshold: float = 0.2) -> List[RecipeModel]:
