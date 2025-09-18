@@ -13,6 +13,8 @@ engine = create_engine(DATABASE_URL, echo=False)
 SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 Base = declarative_base()
 
+_DB_INITIALIZED = False
+
 
 class Decision(Base):
     """Stores prompt engineering decisions."""
@@ -118,6 +120,7 @@ class BanditStats(Base):
 
 def get_db() -> Session:
     """Get database session."""
+    init_db()
     db = SessionLocal()
     try:
         yield db
@@ -125,11 +128,15 @@ def get_db() -> Session:
         db.close()
 
 
-def init_db():
+def init_db() -> None:
     """Initialize database tables."""
+    global _DB_INITIALIZED
+    if _DB_INITIALIZED:
+        return
     Base.metadata.create_all(bind=engine)
-    print("Database initialized successfully")
+    _DB_INITIALIZED = True
 
 
 if __name__ == "__main__":
     init_db()
+    print("Database initialized successfully")
