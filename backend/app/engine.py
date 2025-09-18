@@ -1,6 +1,6 @@
 """Deterministic prompt engineering operators and prompt builder."""
 from __future__ import annotations
-from typing import Dict, List, Tuple
+from typing import List, Tuple
 
 
 def op_role_hdr(category: str) -> str:

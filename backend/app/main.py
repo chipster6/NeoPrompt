@@ -4,8 +4,7 @@ import os
 import uuid
 import logging
 import asyncio
-from datetime import datetime
-from typing import List, Optional, Iterable
+from typing import Optional
 
 from fastapi import FastAPI, Depends, Query, HTTPException, Body
 from fastapi.middleware.cors import CORSMiddleware
@@ -25,7 +24,7 @@ from .schemas import (
     StatsItem,
 )
 from .db import get_db, init_db, Decision, Feedback
-from .recipes import load_recipes, RecipeModel, validate_recipe, RecipesCache, RecipeError, filter_recipes
+from .recipes import RecipeModel, RecipesCache, RecipeError, filter_recipes
 from .optimizer import select_recipe, get_optimizer_stats
 from .enhancer import Enhancer
 from .guardrails import apply_domain_caps, sanitize_text
@@ -156,12 +155,6 @@ async def lifespan(app: FastAPI):
             logger.info("rate_limit_stub_enabled=true")
     except Exception:
         pass
-    # Publish epsilon gauge
-    if os.getenv("RATE_LIMIT_ENABLED", "false").lower() == "true":
-        try:
-            logger.info("rate_limit_stub_enabled=true")
-        except Exception:
-            pass
     # Publish epsilon gauge
     try:
         metrics.set_epsilon_gauge(app.state.epsilon)
@@ -502,11 +495,6 @@ def get_diagnostics():
 @app.get("/bandit_stats")
 def get_bandit_stats(assistant: Optional[str] = None, category: Optional[str] = None, db: Session = Depends(get_db)):
     # Return current BanditStats snapshot with avg_reward
-    q = db.query(
-        Decision.assistant,
-        Decision.category,
-        Decision.recipe_id,
-    )
     # We will pull BanditStats directly to avoid expensive joins
     from .db import BanditStats as _BS
     bsq = db.query(_BS).filter(True)

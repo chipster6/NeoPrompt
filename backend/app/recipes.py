@@ -252,7 +252,6 @@ class RecipesCache:
         recipes_dir_abs = os.path.abspath(self.recipes_dir)
         frags_prefix = os.path.join(recipes_dir_abs, "_fragments") + os.sep
         changed_fragments: Set[str] = set()
-        changed_recipe_files: Set[str] = set()
         for p in abs_changed:
             # If file no longer exists (deleted/renamed), fall back to full reload for safety
             if not os.path.exists(p):
