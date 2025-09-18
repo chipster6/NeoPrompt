@@ -1,0 +1,1 @@
+# Mark app as a package for type checkers
