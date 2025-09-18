@@ -1,5 +1,4 @@
-import re
-from backend.app.engine import build_prompt
+from backend.app.engine import build_prompt, register_operator
 
 def test_build_prompt_force_json_instructions():
     prompt, applied = build_prompt(
@@ -26,3 +25,14 @@ def test_build_prompt_operator_order_deterministic():
     assert applied == ops
     # Ensure raw task appended at end
     assert prompt.strip().endswith("TASK:\nDo X")
+
+
+def test_build_prompt_custom_operator_registry():
+    register_operator("custom_block", lambda ctx: "Custom block", overwrite=True)
+    prompt, applied = build_prompt(
+        raw_input="Investigate",
+        category="science",
+        operators=["custom_block", "role_hdr"],
+    )
+    assert prompt.startswith("Custom block")
+    assert applied == ["custom_block", "role_hdr"]
