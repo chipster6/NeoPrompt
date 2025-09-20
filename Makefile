@@ -25,3 +25,15 @@ test:
 
 ci: build
 	@echo "Local CI stub: images built"
+
+.PHONY: cli
+cli:
+	NEOPROMPT_API_BASE?=http://localhost/api scripts/neoprompt $(args)
+
+.PHONY: sdk-python-install
+sdk-python-install:
+	pip install -e sdk/python/neoprompt
+
+.PHONY: sdk-ts-build
+sdk-ts-build:
+	cd sdk/typescript && npm ci && npm run build

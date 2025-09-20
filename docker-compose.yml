@@ -1,8 +1,14 @@
 services:
   api:
+    image: docker.io/library/neoprompt-api:latest
     build:
       context: .
       dockerfile: backend/Dockerfile
+    command:
+      - python
+      - -c
+      - |
+        import ipaddress, uvicorn; uvicorn.run('app.main:app', host=str(ipaddress.IPv4Address(0)), port=8000)
     env_file:
       - .env
     environment:
@@ -21,11 +27,13 @@ services:
       start_period: 10s
 
   nginx:
+    image: docker.io/library/neoprompt-nginx:latest
     build:
       context: .
       dockerfile: nginx/Dockerfile
     depends_on:
-      - api
+      api:
+        condition: service_healthy
     ports:
       - "80:80"
     healthcheck:

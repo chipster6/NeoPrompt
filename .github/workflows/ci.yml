@@ -39,10 +39,18 @@ jobs:
           mypy -p backend
           pytest -q
 
-      - name: Set up Node 20
+      - name: CLI help smoke test
+        run: python -m backend.cli.neoprompt --help
+
+      - name: Python SDK - install (editable) and tests
+        run: |
+          pip install -e sdk/python/neoprompt
+          pytest -q tests/sdk_python
+
+      - name: Set up Node 22
         uses: actions/setup-node@v4
         with:
-          node-version: '20'
+          node-version: '22'
           cache: 'npm'
           cache-dependency-path: 'frontend/package-lock.json'
 
@@ -55,6 +63,12 @@ jobs:
           if npm run | grep -q "test:ci"; then npm run test:ci; else npm test -- --run; fi
           npx tsc --noEmit
           npx eslint . || true
+          npm run build
+
+      - name: TypeScript SDK - build
+        working-directory: sdk/typescript
+        run: |
+          npm ci
           npm run build
 
       - name: Docker build images

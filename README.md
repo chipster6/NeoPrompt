@@ -195,6 +195,49 @@ Options:
 - --reload (force reload)
 - --fail-on error|warning (exit non-zero if threshold met)
 
+### Console CLI (neoprompt)
+
+Interactive console-friendly wrapper around the API.
+
+Examples:
+
+```bash
+# Help and health
+scripts/neoprompt --help
+scripts/neoprompt health
+
+# Choose using stdin
+echo "Write a haiku about the sea" | scripts/neoprompt choose --assistant chatgpt --category coding
+
+# Choose with flags and interactive feedback prompt
+scripts/neoprompt choose --assistant claude --category science --enhance --interactive
+
+# Send feedback for a previous decision
+scripts/neoprompt feedback --decision-id <ID> --reward 1
+```
+
+### SDKs
+
+Python (editable install):
+
+```bash
+pip install -e sdk/python/neoprompt
+python - <<'PY'
+from neoprompt import Client
+with Client() as c:
+    print(c.health())
+PY
+```
+
+TypeScript (build + use):
+
+```bash
+cd sdk/typescript
+npm install
+npm run build
+node -e "import('./dist/index.js').then(async m => console.log(await new m.Client().health()))"
+```
+
 ## Milestones
 
 - **M1 - Functional MVP**: Core prompt generation, copy functionality, basic feedback

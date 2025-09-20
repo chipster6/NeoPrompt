@@ -1,0 +1,58 @@
+name: sdk-pack
+on:
+  tags:
+    - "v*.*.*"
+
+jobs:
+  python-sdk:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Build sdist/wheel
+        working-directory: sdk/python/neoprompt
+        run: |
+          pip install build
+          python -m build
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: python-sdk-dist
+          path: sdk/python/neoprompt/dist/*
+      - name: Publish to TestPyPI (optional)
+        if: env.PUBLISH_TESTPYPI == '1'
+        env:
+          PUBLISH_TESTPYPI: ${{ secrets.PUBLISH_TESTPYPI }}
+          TWINE_USERNAME: __token__
+          TWINE_PASSWORD: ${{ secrets.TESTPYPI_API_TOKEN }}
+        run: |
+          pip install twine
+          twine upload --repository testpypi sdk/python/neoprompt/dist/*
+
+  ts-sdk:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - name: Build and pack
+        working-directory: sdk/typescript
+        run: |
+          npm ci
+          npm run build
+          npm pack
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: ts-sdk-pack
+          path: sdk/typescript/*.tgz
+      - name: Publish to npm (optional)
+        if: env.PUBLISH_NPM == '1'
+        env:
+          PUBLISH_NPM: ${{ secrets.PUBLISH_NPM }}
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+        working-directory: sdk/typescript
+        run: npm publish
