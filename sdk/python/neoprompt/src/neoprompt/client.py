@@ -81,9 +81,11 @@ class Client:
         reward: Union[int, float],
         components: Optional[Dict[str, Any]] = None,
     ) -> Dict[str, Any]:
-        payload: Dict[str, Any] = {"decision_id": decision_id, "reward": float(reward)}
-        if components:
-            payload["reward_components"] = components
+        payload: Dict[str, Any] = {
+            "decision_id": decision_id,
+            "reward": float(reward),
+            "reward_components": components or {},
+        }
         r = self._request("POST", "/feedback", json=payload)
         r.raise_for_status()
         return r.json()
