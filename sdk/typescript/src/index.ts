@@ -32,7 +32,12 @@ export interface ClientOptions {
   timeoutMs?: number; // reserved for future
 }
 
-const defaultBase = (typeof process !== 'undefined' && process.env?.NEOPROMPT_API_BASE) ?? "http://localhost/api";
+// Resolve default base URL safely for both Node and browser builds
+// In browsers, typeof process === 'undefined'; use fallback string.
+// In Node, prefer env var when set and non-empty; otherwise fallback.
+const defaultBase = (typeof process !== 'undefined' && process.env?.NEOPROMPT_API_BASE)
+  ? process.env.NEOPROMPT_API_BASE!
+  : "http://localhost/api";
 
 export class Client {
   constructor(private opts: ClientOptions = {}) {}
