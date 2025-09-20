@@ -351,3 +351,40 @@ npm run dev
 - Hotkeys, history filters, token estimate.
 - Optional text storage for searchable history.
 - Ready for packaging (Tauri) if you want a desktop icon.
+
+---
+
+## Milestones M3–M5 (Advanced Features)
+
+### Milestone M3 — Control-Layer Simulation & Replay
+- Extend `Run` records to capture full environment context (model version, flags, operator chain, user state).
+- API Endpoints:
+  - `POST /replay {run_ids[], target_model}` → re-executes runs against new model, linking results to originals.
+  - `GET /replay-results?orig_run_id=` → shows diffs and drift metrics.
+- Diff Engine: sentence-level, character-level, and Jaccard/cosine similarity scores.
+- CLI: `replay` option to select past runs, target model, and display side-by-side results.
+- Metrics: drift percentages, replay counts, regression indicators.
+
+### Milestone M4 — Dynamic Prompt Stress-Testing Engine
+- Generate adversarial, malformed, and edge-case inputs automatically.
+- API Endpoints:
+  - `POST /stress-test {template_id, profile}` → runs a set of adversarial cases.
+  - `GET /stress-results?profile_id=` → retrieves summary of pass/fail rates by case type.
+- Schema:
+  - `StressProfile(id, template_id, params(json), created_at)`
+  - `StressResult(profile_id, run_id, case_type, pass_fail, error_msg, latency_ms)`
+- CLI: `stress` option to run predefined profiles and print a fail matrix.
+- CI/CD: Hook into pipelines (pytest/gh actions) to block merges on failures.
+- Metrics: injection resistance scores, SLA violations, robustness indexes.
+
+### Milestone M5 — Automated Prompt Optimizer with Explainable Operators
+- Each operator tagged with: intent, rationale, deterministic flag, expected effect.
+- API Endpoints:
+  - `POST /optimize {template_id, targets:[clarity, bias, compression]}` → suggests improved prompts with explanations and diffs.
+  - `POST /optimize/accept {opt_result_id}` → saves approved optimization as a new version with provenance.
+- Schema:
+  - `OptimizationResult(id, template_id, targets[], diffs[], rationale, created_at)`
+- CLI: `optimize` command to preview, accept, or reject operator suggestions.
+- Governance: Enterprise mode can enforce required operators before publishing.
+
+---

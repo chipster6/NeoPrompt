@@ -1,0 +1,16 @@
+{
+  "name": "neoprompt-sdk",
+  "version": "0.1.0",
+  "description": "Minimal TypeScript SDK for NeoPrompt API",
+  "type": "module",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "prepublishOnly": "npm run build"
+  },
+  "devDependencies": {
+    "@types/node": "^22.7.5",
+    "typescript": "^5.6.3"
+  }
+}
