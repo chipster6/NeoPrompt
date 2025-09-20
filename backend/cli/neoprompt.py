@@ -96,6 +96,7 @@ def cmd_feedback(args: argparse.Namespace) -> None:
     payload: Dict[str, Any] = {
         "decision_id": args.decision_id,
         "reward": float(args.reward),
+        "reward_components": {},
     }
     if args.reward_components:
         try:
