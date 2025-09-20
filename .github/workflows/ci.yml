@@ -29,7 +29,7 @@ jobs:
           python -m pip install --upgrade pip
           pip install -r backend/requirements.txt ruff mypy pytest
 
-      - name: Backend lint/type/test
+      - name: Backend lint/type/test (exclude SDK tests)
         env:
           PYTHONPATH: ${{ github.workspace }}
           MYPYPATH: ${{ github.workspace }}
@@ -37,7 +37,8 @@ jobs:
         run: |
           ruff check backend
           mypy -p backend
-          pytest -q
+          # Run only backend/CLI tests here; SDK tests run after SDK install
+          pytest -q tests/cli
 
       - name: CLI help smoke test
         run: python -m backend.cli.neoprompt --help
