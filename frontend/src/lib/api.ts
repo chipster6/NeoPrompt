@@ -1,4 +1,7 @@
-export const API_BASE = import.meta.env.VITE_API_BASE || 'http://127.0.0.1:7070';
+// Vite injects import.meta.env at build-time; declare a minimal type for TS
+declare const importMeta: { env: Record<string, string | undefined> };
+const _env = (typeof import.meta !== 'undefined' ? (import.meta as any).env : (globalThis as any).importMeta?.env) || {};
+export const API_BASE = _env.VITE_API_BASE || '/api';
 
 export async function apiChoose(payload: {
   assistant: string;

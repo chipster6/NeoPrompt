@@ -1,0 +1,10 @@
+.git
+**/__pycache__/
+**/*.pyc
+node_modules
+frontend/node_modules
+frontend/dist
+.venv
+.env
+.DS_Store
+docker-compose.override.yml

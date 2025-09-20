@@ -8,6 +8,10 @@ import StatsPanel from './components/StatsPanel'
 import { useToast } from './components/ToastProvider'
 
 export default function App() {
+  return <AppImpl />
+}
+
+export function AppImpl() {
   const { showToast } = useToast()
   const [assistant, setAssistant] = useState('chatgpt')
   const [category, setCategory] = useState('coding')

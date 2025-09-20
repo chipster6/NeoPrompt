@@ -203,4 +203,36 @@ Options:
 
 ## Project Status
 
-🚧 **Under Development** - Currently building M1 MVP
+M0 complete baseline: two-container stack (api + nginx), env-driven CORS, health endpoints, schema endpoint, structured logging, rate-limit stub, CI updated.
+
+## M0 Acceptance Checklist (run)
+
+1) Bring up stack
+- make build
+- make up
+- docker ps  # api and nginx should be healthy
+
+2) Health & metrics
+- curl -fsS http://localhost/healthz
+- curl -fsS http://localhost/api/healthz
+- curl -fsS http://localhost/api/metrics | head
+
+3) Frontend (no dev server)
+- open http://localhost/
+
+4) API via Nginx proxy
+- curl -fsS http://localhost/api/prompt-templates
+
+5) Alias + deprecation
+- curl -fsS http://localhost/api/recipes
+- docker compose logs api | grep -i deprecated
+
+6) CORS policy
+- With CORS_ALLOW_ORIGINS=http://localhost, preflight from http://localhost succeeds
+- In ENV=dev and empty CORS list, wildcard allowed
+
+7) SQLite persistence (via volume)
+- create decision via /choose, restart stack, verify in /history
+
+8) Schema endpoint
+- curl -fsS http://localhost/api/prompt-templates/schema | jq .title
