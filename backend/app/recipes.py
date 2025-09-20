@@ -14,6 +14,15 @@ import yaml
 from pydantic import BaseModel, ValidationError, Field
 from dotenv import dotenv_values
 
+# Optional JSON Schema validation (enabled via env or strict mode)
+try:  # pragma: no cover - optional dependency
+    import json
+    from jsonschema import Draft202012Validator as _JSONValidator  # type: ignore
+    from jsonschema.exceptions import ValidationError as _JSONSchemaValidationError  # type: ignore
+except Exception:  # pragma: no cover - optional dependency
+    _JSONValidator = None  # type: ignore
+    _JSONSchemaValidationError = None  # type: ignore
+
 logger = logging.getLogger("prompt_console")
 
 
@@ -229,6 +238,9 @@ class RecipesCache:
         self._env_loaded = False
         self._env_values: Dict[str, str] = {}
         self._env_whitelist: Set[str] = set()
+        # JSON Schema validator (optional)
+        self._json_validator = None
+        self._json_schema_loaded = False
 
     def snapshot(self) -> Tuple[List[RecipeModel], List[RecipeError]]:
         return list(self._recipes), list(self._errors)
@@ -420,6 +432,10 @@ class RecipesCache:
                         errors.append(RecipeError(file_path=file_path, error=f"extends parent '{parent}' assistant/category mismatch", error_type="cross_file_validation", line_number=None))
                         if strict:
                             block_errors = True
+            # Optional JSON Schema validation prior to Pydantic
+            if not self._validate_with_jsonschema(model_input, file_path, strict, errors):
+                if strict:
+                    block_errors = True
             try:
                 model = RecipeModel(**model_input)
             except ValidationError as e:
@@ -635,6 +651,59 @@ class RecipesCache:
         for f, defs in self._defines_by_file.items():
             by_file.setdefault(f, {"includes": [], "defines": defs})
         return by_id, by_file
+
+    def _ensure_json_schema_loaded(self) -> None:
+        """Load JSON Schema validator once if enabled and available."""
+        if self._json_schema_loaded:
+            return
+        # Only load if the dependency is present
+        if _JSONValidator is None:
+            self._json_schema_loaded = True
+            self._json_validator = None
+            return
+        try:
+            # Locate repo root from recipes_dir (prompt-templates/) -> parent
+            repo_root = Path(self.recipes_dir).resolve().parent
+            schema_path = repo_root / "docs" / "prompt_template.schema.json"
+            if schema_path.exists():
+                with open(schema_path, "r", encoding="utf-8") as f:
+                    schema_obj = json.load(f)
+                self._json_validator = _JSONValidator(schema_obj)
+            else:
+                self._json_validator = None
+        except Exception:
+            # If schema fails to load, continue without JSON Schema enforcement
+            self._json_validator = None
+        finally:
+            self._json_schema_loaded = True
+
+    def _jsonschema_enabled(self, strict: bool) -> bool:
+        try:
+            return strict or (os.getenv("PROMPT_TEMPLATES_JSONSCHEMA", "0") == "1")
+        except Exception:
+            return strict
+
+    def _validate_with_jsonschema(self, model_input: Dict[str, Any], file_path: str, strict: bool, collect_errors: List[RecipeError]) -> bool:
+        """Validate model_input against JSON Schema if enabled. Return True if ok."""
+        if not self._jsonschema_enabled(strict):
+            return True
+        self._ensure_json_schema_loaded()
+        if not self._json_validator:
+            return True
+        try:
+            self._json_validator.validate(model_input)
+            return True
+        except Exception as ve:  # includes _JSONSchemaValidationError
+            # Extract message and path if available
+            msg = str(ve)
+            try:
+                path = getattr(ve, "absolute_path", [])  # type: ignore[attr-defined]
+                path_str = ".".join(str(p) for p in path) if path else "<root>"
+                msg = f"jsonschema: {getattr(ve, 'message', msg)} at {path_str}"
+            except Exception:
+                pass
+            collect_errors.append(RecipeError(file_path=file_path, error=msg, error_type="schema_validation", line_number=None))
+            return False
 
     def get_deps(self) -> Tuple[Dict[str, Dict[str, List[str]]], Dict[str, Dict[str, List[str]]]]:
         return self._build_deps_payload()
@@ -861,6 +930,10 @@ class RecipesCache:
                             errors.append(RecipeError(file_path=file_path, error=f"extends parent '{parent}' assistant/category mismatch", error_type="cross_file_validation", line_number=None))
                             if strict:
                                 block_errors = True
+                # Optional JSON Schema validation prior to Pydantic
+                if not self._validate_with_jsonschema(model_input, file_path, strict, errors):
+                    if strict:
+                        block_errors = True
                 try:
                     model = RecipeModel(**model_input)
                 except ValidationError as e:

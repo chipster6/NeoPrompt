@@ -45,11 +45,21 @@ export async function apiHistory(params: { limit?: number; assistant?: string; c
 }
 
 export async function apiRecipes(reload?: boolean) {
-  const url = new URL(`${API_BASE}/recipes`);
-  if (reload) url.searchParams.set('reload', '1');
-  const res = await fetch(url.toString());
-  if (!res.ok) throw new Error('Recipes failed');
-  return res.json();
+  // Prefer canonical /prompt-templates; fall back to legacy /recipes if needed
+  const makeUrl = (path: string) => {
+    const u = new URL(`${API_BASE}${path}`)
+    if (reload) u.searchParams.set('reload', '1')
+    return u
+  }
+
+  // Try canonical endpoint first
+  let res = await fetch(makeUrl('/prompt-templates').toString())
+  if (!res.ok) {
+    // Fallback to legacy alias
+    res = await fetch(makeUrl('/recipes').toString())
+  }
+  if (!res.ok) throw new Error('Recipes failed')
+  return res.json()
 }
 
 export async function apiStatsGet(params: { assistant?: string; category?: string } = {}) {

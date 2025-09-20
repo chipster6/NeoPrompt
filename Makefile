@@ -1,6 +1,6 @@
 SHELL := /bin/bash
 
-.PHONY: build up down logs fmt lint test ci
+.PHONY: build up down logs fmt lint typecheck test ci
 
 build:
 	docker compose build --pull
@@ -14,14 +14,27 @@ down:
 logs:
 	docker compose logs -f
 
+# Format code (best-effort, non-fatal)
 fmt:
-	@echo "Formatters will be added in a later phase"
+	-ruff check backend --fix || true
+	-cd frontend && npx eslint . --fix || true
 
+# Lint code
 lint:
-	@echo "Linters will be added in a later phase"
+	ruff check backend
+	cd frontend && npx eslint .
 
+# Typecheck (Python + TypeScript)
+typecheck:
+	mypy -p backend
+	cd frontend && npx tsc --noEmit
+
+# Run tests (backend + frontend)
+# Backend: prefer pytest in virtualenv; fallback to python -m pytest
+# Frontend: prefer test:ci if present; otherwise run tests once
 test:
-	@echo "Tests will be added in a later phase"
+	pytest -q tests/backend || python -m pytest -q tests/backend
+	cd frontend && (npm run | grep -q "test:ci" && npm run test:ci || npm test -- --run)
 
 ci: build
 	@echo "Local CI stub: images built"
