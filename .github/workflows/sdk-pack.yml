@@ -1,7 +1,9 @@
 name: sdk-pack
 on:
-  tags:
-    - "v*.*.*"
+  push:
+    tags:
+      - "v*.*.*"
+  workflow_dispatch:
 
 jobs:
   python-sdk:
