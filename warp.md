@@ -4,11 +4,37 @@ This file aggregates key notebooks and documentation for quick reference within 
 
 ---
 
-### <notebook:sx3NnKzLfRAFgi6CxkNTFQ>
-ID: sx3NnKzLfRAFgi6CxkNTFQ
-Name: NeoPrompt Tech Spec
+### <notebook:V2qQbJrQO-5E5F5S7sQ3hA>
+ID: V2qQbJrQO-5E5F5S7sQ3hA
+Name: NeoPrompt Tech Spec V2
 Type: Notebook
 Content:
+
+NeoPrompt Tech Spec V2 is the current source of truth.
+
+- Architecture: Hexagonal (Core + Ports + Adapters). Engine uses PromptDoc IR, RulePacks, and an Operator Planner.
+- LLM Assist: Hugging Face Serverless (Editor/Critic) as default; Local-Only is available via config.
+- APIs: /engine/plan, /engine/transform, /engine/score; strict JSON I/O for Editor/Critic; fallback to offline baseline when needed.
+- Config: Provider registry in configs/models.yaml; environment profiles in .env.local-hf and .env.local-only.
+- Observability: engine_quality_score metric; structured logs with operator trace.
+
+Source file:
+- /Users/cody/NeoPrompt/NeoPrompt_TechSpecV2.md
+
+```warp-runnable-command
+# Optional (only if infra/compose exists): bring up local-hf profile
+[ -d infra/compose ] && docker compose -f infra/compose/docker-compose.local-hf.yml up --build || echo "infra/compose not present (optional)"
+```
+
+---
+
+### <notebook:sx3NnKzLfRAFgi6CxkNTFQ>
+ID: sx3NnKzLfRAFgi6CxkNTFQ
+Name: NeoPrompt Tech Spec (Legacy v1)
+Type: Notebook
+Content:
+
+> NOTE: Legacy (v1) — superseded by V2. See notebook ID V2qQbJrQO-5E5F5S7sQ3hA and /Users/cody/NeoPrompt/NeoPrompt_TechSpecV2.md for the current spec.
 
 # **Prompt Engineering Console — Technical Specification \(Warp\-ready\)**
 

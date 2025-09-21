@@ -1,8 +1,25 @@
-# Operations Runbook
+# Operations Runbook (V2)
 
-This runbook covers feature toggles, rollout/rollback, and key diagnostics for NeoPrompt’s bandit optimizer and recipe reload/validation pipeline.
+This runbook covers environment profiles, provider/egress policies, diagnostics, and planned endpoints for replay/stress/optimize. Legacy bandit ops are preserved below.
 
-Bandit toggle and rollout
+
+Environment profiles
+- .env.local-hf (default MVP): HF_TOKEN, PROVIDER_ALLOWLIST=hf, EGRESS_ALLOWLIST
+- .env.local-only (strict): NO_NET_MODE=true; no remote providers
+
+Provider & egress policy
+- Requests to remote providers are allowed only if provider ∈ PROVIDER_ALLOWLIST AND domain ∈ EGRESS_ALLOWLIST
+- Violations return {"error":{"code":"EGRESS_BLOCKED", ...}}
+
+Diagnostics
+- Use /engine/plan to inspect packs_applied and operator_plan
+- Use /engine/transform for full trace, quality score, and assist operator outcomes
+- /diagnostics aggregates recent validation and runtime issues
+
+Planned endpoints (post-MVP)
+- /replay, /stress-test, /optimize — align with NeoPrompt_TechSpecV2.md roadmap
+
+Legacy: Bandit toggle and rollout
 - Toggle: BANDIT_ENABLED=0|1 (env). Default is 0.
 - Rollout plan:
   1) Dark launch: ensure BANDIT_ENABLED=0 in prod; verify no behavior changes and metrics endpoint up.
@@ -29,22 +46,19 @@ Monitoring (Prometheus)
   - Explore rate tracks ε over time (ratio of explored=true to total selections)
   - Mean rewards trending upward; latency within budget
 
-Recipe reload modes
+Legacy (v1) recipe reload modes (if applicable)
 - RECIPES_RELOAD_MODE: events|poll|off (default events)
-  - events uses watchfiles; falls back to poll on failure
-  - off recommended for immutable images or read-only filesystems
 - RECIPES_RELOAD_INTERVAL_SECONDS: poll cadence (default 5)
 - RECIPES_DEBOUNCE_MS: event debounce (default 300)
 
-Validation strictness
-- VALIDATION_STRICT: 0|1 (default 0). When 1, semantic-invalid recipes are excluded according to scope.
+Legacy (v1) validation strictness (recipes)
+- VALIDATION_STRICT: 0|1 (default 0)
 - VALIDATION_STRICT_SCOPE: all|critical (default all)
-  - critical excludes for law/medical only
 
 Troubleshooting
-- No recipes available (503 on /choose):
-  - GET /recipes?reload=true and GET /diagnostics for errors and severities
-  - Confirm VALIDATION_STRICT and SCOPE aren’t overly aggressive
+- Engine diagnostics unclear for a seed:
+  - POST /engine/plan and /engine/transform; check returned warnings/errors and operator_trace
+  - Check provider/egress policy (EGRESS_BLOCKED) and assist JSON (ASSIST_JSON_INVALID)
 - Bandit not taking effect:
   - Check BANDIT_ENABLED=1 in environment and logs for "bandit.enabled true"
   - Verify /bandit_stats reflects selections; watch metrics counters

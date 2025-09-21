@@ -1,8 +1,14 @@
-# Personal Prompt Engineering Console
+# NeoPrompt — Prompt Engineering Console (V2)
 
 A local middleware tool that transforms raw user requests into optimized, assistant-aware prompts tailored for different LLM assistants (ChatGPT, Claude, Gemini, DeepSeek) and categories (coding, science, psychology, law, politics).
 
-## Features
+## Features (V2)
+
+- Local-First engine with optional LLM Assist (HF Serverless) for Editor/Critic
+- PromptDoc IR + RulePacks + Operator Planner with explainability and quality scoring
+- Strict JSON I/O for assist ops; fallback to offline baseline when assist is not superior
+- Observability: engine_quality_score, structured logs with operator trace
+- Configurable providers via configs/models.yaml; environment profiles via .env.local-hf or .env.local-only
 
 - **Matrix-inspired UI**: Terminal console aesthetic with dark theme
 - **Smart Prompt Engineering**: Applies deterministic operators based on assistant and category
@@ -11,7 +17,19 @@ A local middleware tool that transforms raw user requests into optimized, assist
 - **Privacy-First**: Local SQLite storage, optional text persistence
 - **Optional Enhancement**: Local LLM for input clarification
 
-## Architecture
+## Architecture (Hexagonal)
+
+Core (pure domain)
+- engine/models (PromptDoc), rulepacks/, planner/, operators/, scoring/
+
+Ports
+- llm_provider, storage, cache, safety, events
+
+Adapters
+- providers (hf, tgi, ollama, openai, anthropic), storage (sqlite/postgres), cache (inmem/redis)
+
+App shells
+- api (FastAPI), cli (developer workflows), ui (single screen, optional)
 
 ```
 Frontend (React + Vite + Tailwind)
@@ -21,23 +39,19 @@ Frontend (React + Vite + Tailwind)
   ├─ History Panel (filters/search)
   └─ Settings (prompt templates viewer/hot-reload)
 
-Backend (FastAPI, Python 3.12)
-  ├─ /choose      -> select recipe, (optional) enhance input, build engineered prompt
-  ├─ /feedback    -> record reward components + aggregate reward
-  ├─ /history     -> list recent decisions (with/without text)
-  ├─ /recipes     -> list recipes and validation errors
-  ├─ /prompt-templates -> alias of /recipes (Phase B, read-only)
-  ├─ engine.py    -> deterministic operators
-  ├─ optimizer.py -> ε-greedy scorer per assistant×category
-  ├─ enhancer.py  -> optional local/hosted LLM rewriter
-  └─ guardrails.py-> JSON/schema validation; domain caps (law/medical)
+API (FastAPI)
+  ├─ POST /engine/plan        -> resolve RulePacks and operator plan
+  ├─ POST /engine/transform   -> produce HLEP, quality score, operator trace
+  ├─ POST /engine/score       -> quality scorer only
+  ├─ GET  /templates, /choose, /feedback, /diagnostics (core)
+  ├─ (M3+) /replay, (M4+) /stress-test, (M5+) /optimize
 
 Storage (SQLite via SQLAlchemy)
   ├─ decisions table
   └─ feedback table
 ```
 
-## Development Setup
+## Development Setup (Local-First)
 
 Run the following once to install the pinned Python (3.12.10) and Node (22) versions:
 
@@ -47,7 +61,7 @@ mise install
 mise trust .mise.toml
 ```
 
-### Backend
+### Backend (API)
 ```bash
 cd backend
 python3 -m venv .venv && source .venv/bin/activate
@@ -61,8 +75,8 @@ uvicorn app.main:app --reload --port 7070
 Logging
 - Set LOG_LEVEL=DEBUG to increase verbosity.
 
-Prompt templates cache (a.k.a. recipes)
-- Cached in-memory; GET /recipes?reload=true forces a refresh.
+Engine cache
+- Caches packs/plan results; diagnostics available via /diagnostics.
 
 Testing
 ```bash
@@ -71,7 +85,7 @@ pytest -q || python -m pytest -q
 ```
 
 Scripts
-- scripts/curl-examples.sh contains example curl commands for local verification of /recipes (alias: /prompt-templates).
+- scripts/curl-examples.sh contains example curl commands (update to /engine/* as V2 endpoints come online).
 
 ### Frontend
 ```bash
@@ -81,41 +95,32 @@ npm run dev
 # Open http://localhost:5173
 ```
 
-## Configuration
+## Configuration (Profiles + Providers)
 
 Environment variables and defaults
 
-- Core
-  - RECIPES_DIR: Path to prompt templates directory (default backend/app/../../prompt-templates)
-  - PROMPT_TEMPLATES_DIR: Optional alias for RECIPES_DIR; if set, it takes precedence (preferred going forward)
-  - LOG_LEVEL: Logging level (default INFO)
-  - DATABASE_URL: SQLAlchemy database URL (default sqlite:///./console.sqlite)
-  - STORE_TEXT: 1 to store raw/engineered text with decisions; 0 to disable (default 0)
-  - EPSILON: Exploration rate for ε-greedy optimizer (default 0.10)
+Profiles (choose one)
+- .env.local-hf (MVP default)
+  - APP_ENV=local
+  - NO_NET_MODE=false
+  - PROVIDER_ALLOWLIST=hf
+  - EGRESS_ALLOWLIST=api-inference.huggingface.co,*.endpoints.huggingface.cloud
+  - HF_TOKEN=***
+  - LLM_ASSIST_ENABLED=true
+  - MODEL_DEFAULT=hf/mistralai/Mistral-7B-Instruct-v0.3
+- .env.local-only (strict)
+  - APP_ENV=local
+  - NO_NET_MODE=true
+  - LLM_ASSIST_ENABLED=false
 
-- Reload
-  - RECIPES_RELOAD_MODE: events | poll | off (default events)
-  - RECIPES_RELOAD_INTERVAL_SECONDS: polling interval (default 5)
-  - RECIPES_DEBOUNCE_MS: debounce for file events (default 300)
-  - RECIPES_RECURSIVE: set to 1 to watch recipes/**/*.yaml recursively (default 0)
+Providers (configs/models.yaml)
+- Register provider base URLs and models (hf, tgi, ollama, openai, anthropic)
 
-- Validation
-  - VALIDATION_STRICT: 0/1 (default 0). When 1, semantic-invalid recipes are excluded according to scope.
-  - VALIDATION_STRICT_SCOPE: all | critical (default all). When strict=1 and scope=critical, semantic-invalid are excluded only for law/medical categories.
+Core
+- LOG_LEVEL, DATABASE_URL (sqlite by default), STORE_TEXT (default 0)
+- Policy: provider/egress allowlists; violations return EGRESS_BLOCKED
 
-- Bandit (feature-flagged rollout)
-  - BANDIT_ENABLED: 0/1 (default 0). When 1, /choose delegates selection to BanditService.
-  - BANDIT_MIN_INITIAL_SAMPLES: Cold-start threshold per recipe before exploitation (default 1)
-  - BANDIT_OPTIMISTIC_INITIAL_VALUE: Prior mean for unseen recipes (default 0.0)
-  - Runtime tuning: POST /bandit_config; metrics at GET /metrics; stats at GET /bandit_stats.
-
-- Enhancer (optional)
-  - ENHANCER_ENABLED: 0/1 (default 0)
-  - ENHANCER_ENDPOINT, ENHANCER_API_KEY
-  - ENHANCER_MODEL (default google/flan-t5-base)
-  - ENHANCER_MAX_NEW_TOKENS (default 128)
-
-## Hot Reload and Recipe Diagnostics
+## Diagnostics
 
 - The backend maintains an in-memory cache of the last-known-good recipes (atomic snapshot).
 - Default mode uses filesystem events to hot-reload recipe changes with debounce; it automatically falls back to mtime polling if events are unavailable.
@@ -140,22 +145,14 @@ curl -s 'http://127.0.0.1:7070/diagnostics' | jq
 ```
 
 Diagnostics
-- The `/recipes` endpoint returns both parsed recipes and validation errors/warnings with fields:
-  - `file_path`, `error`, `line_number` (when available), `error_type` (`yaml_parse`, `schema_validation`, `semantic_validation`), and `severity` (`error` or `warning`).
-- It also returns a `meta` section:
-  - `reload_mode`, `dir`, and other runtime details.
-- If no valid recipes are available, `/choose` responds with a structured 503:
-
-```json
-{"detail": {"code": "recipes_unavailable", "message": "No valid recipes available, see /recipes for details"}}
-```
+- /engine/plan and /engine/transform return validation issues for schemas and JSON I/O
+- Common error codes: ASSIST_JSON_INVALID, EGRESS_BLOCKED, ENGINE_VERIFY_FAILED (see NeoPrompt_TechSpecV2.md)
 
 Observability
-- Logs include structured messages for reloads: outcome, reason, files scanned, valid/error counts, and duration.
+- Structured logs include operator trace and assist outcomes when enabled
 - Prometheus metrics (exposed at `/metrics`):
-  - `neopr_recipes_reload_total{outcome,reason}`
-  - `neopr_recipes_reload_duration_seconds`
-  - `neopr_recipes_valid_count`, `neopr_recipes_error_count`
+  - `engine_quality_score{model,category}`
+  - `http_requests_total{endpoint,status}`, `http_latency_seconds_bucket{endpoint}`
 
 Manual test plan (quick)
 - Events mode (macOS):
@@ -182,7 +179,7 @@ Notes
 }
 ```
 
-## CLI Usage
+## CLI Usage (will align with /engine/*)
 
 Run a validation pass and print diagnostics:
 
@@ -238,6 +235,14 @@ npm run build
 node -e "import('./dist/index.js').then(async m => console.log(await new m.Client().health()))"
 ```
 
+## What changed from v1 → v2
+
+- Architecture: monolith → hexagonal (Core + Ports + Adapters)
+- Recipes → PromptDoc + RulePacks
+- Endpoints: /choose + /recipes → /engine/plan, /engine/transform, /engine/score
+- LLM Assist default via HF Serverless; strict JSON I/O with fallback
+- Security: provider/egress allowlists, NO_NET_MODE profile
+
 ## Milestones
 
 - **M1 - Functional MVP**: Core prompt generation, copy functionality, basic feedback
@@ -245,6 +250,8 @@ node -e "import('./dist/index.js').then(async m => console.log(await new m.Clien
 - **M3 - Daily Comfort**: Hotkeys, history filters, desktop packaging (Tauri)
 
 ## Project Status
+
+Note: Some V2 endpoints and infra (compose, configs/) may be introduced incrementally. Where references exist, they are marked as planned and will be added as the engine components land.
 
 M0 complete baseline: two-container stack (api + nginx), env-driven CORS, health endpoints, schema endpoint, structured logging, rate-limit stub, CI updated.
 
@@ -266,9 +273,9 @@ M0 complete baseline: two-container stack (api + nginx), env-driven CORS, health
 4) API via Nginx proxy
 - curl -fsS http://localhost/api/prompt-templates
 
-5) Alias + deprecation
-- curl -fsS http://localhost/api/recipes
-- docker compose logs api | grep -i deprecated
+5) Engine endpoints (as available)
+- curl -fsS http://localhost/api/engine/plan -X POST -d '{"seed":"...","model":"...","category":"..."}'
+- curl -fsS http://localhost/api/engine/transform -X POST -d '{"seed":"...","model":"...","category":"..."}'
 
 6) CORS policy
 - With CORS_ALLOW_ORIGINS=http://localhost, preflight from http://localhost succeeds

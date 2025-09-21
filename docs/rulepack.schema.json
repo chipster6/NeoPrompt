@@ -1,0 +1,18 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://example.com/neoprompt/rulepack.schema.json",
+  "title": "NeoPrompt RulePack",
+  "description": "Schema stub for RulePacks (V2). This is a starting point and will be expanded.",
+  "type": "object",
+  "properties": {
+    "id": { "type": "string" },
+    "type": { "type": "string", "enum": ["global","model","category","org","project","user"] },
+    "priority": { "type": "integer", "minimum": 0 },
+    "applies_to": { "type": "object" },
+    "directives": { "type": "object" },
+    "operators": { "type": "object" },
+    "checklist": { "type": "array", "items": { "type": "object" } }
+  },
+  "required": ["id","type"],
+  "additionalProperties": true
+}

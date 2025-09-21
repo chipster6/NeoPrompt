@@ -26,8 +26,8 @@ This checklist covers the MVP DoD for Console, Toolbar, Output, History, and Set
 
 - Settings
   - Modal opens and closes; backdrop click closes
-  - Recipes blob loads and renders JSON
-  - Reload Recipes refreshes data (GET /recipes?reload=1)
+- Diagnostics/Packs view loads and renders data (temporary: legacy recipes until UI migrates)
+- Reload diagnostics refreshes data (planned: /engine/*; temporary: legacy /recipes)
   - STORE_TEXT checkbox toggles preference in localStorage
   - Token cost input updates localStorage and affects estimates
 
@@ -44,4 +44,6 @@ This checklist covers the MVP DoD for Console, Toolbar, Output, History, and Set
 - Non-regression quicks
   - No console errors in dev tools
   - Vite dev server compiles cleanly; TS checker shows no errors
-  - Backend endpoints: /recipes, /choose, /feedback, /history reachable with API_BASE
+- Backend endpoints reachable with API_BASE
+  - V2: /engine/plan, /engine/transform, /engine/score, /diagnostics
+  - Legacy (until migration): /recipes, /choose, /feedback, /history

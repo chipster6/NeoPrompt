@@ -1,5 +1,7 @@
 # NeoPrompt Python SDK (stub)
 
+Note: The SDK is migrating to the V2 engine endpoints (/engine/*) and CLI workflows described in NeoPrompt_TechSpecV2.md. Current examples may reflect legacy v1 and will be updated.
+
 Local install (editable):
 
 ```bash

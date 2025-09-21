@@ -1,3 +1,5 @@
+> NOTE: DEPRECATED — see docs/rulepacks_authoring.md for V2 authoring guidance. This document describes legacy recipes (v1).
+
 # Authoring Prompt Templates (Recipes)
 
 This guide shows how to create and maintain prompt templates (formerly called "recipes").
