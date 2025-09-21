@@ -1,5 +1,11 @@
 # NeoPrompt — Prompt Engineering Console (V2)
 
+[![CI](https://img.shields.io/github/actions/workflow/status/NeodigmLabs/NeoPrompt/ci.yml?label=CI&logo=github)](https://github.com/NeodigmLabs/NeoPrompt/actions/workflows/ci.yml)
+[![Docker](https://img.shields.io/github/actions/workflow/status/NeodigmLabs/NeoPrompt/docker-publish.yml?label=Docker&logo=docker)](https://github.com/NeodigmLabs/NeoPrompt/actions/workflows/docker-publish.yml)
+[![Python](https://img.shields.io/badge/python-3.12-blue.svg?logo=python)](backend/requirements.txt)
+
+NeoPrompt is a local-first prompt engineering engine that converts raw prompts into High-Level Engineered Prompts (HLEPs), with optional Hugging Face LLM Assist.
+
 A local middleware tool that transforms raw user requests into optimized, assistant-aware prompts tailored for different LLM assistants (ChatGPT, Claude, Gemini, DeepSeek) and categories (coding, science, psychology, law, politics).
 
 ## Features (V2)
@@ -50,6 +56,16 @@ Storage (SQLite via SQLAlchemy)
   ├─ decisions table
   └─ feedback table
 ```
+
+## Documentation
+
+- [Quickstart](docs/QUICKSTART.md) — spin up the engine with or without Hugging Face assist and learn the response shapes.
+- [Operating Modes](docs/OPERATING_MODES.md) — switch between local-only, assisted, replay, and stress-testing profiles.
+- [Engine API](docs/ENGINE_API.md) — request/response contracts and curl examples for `/engine/*` endpoints.
+- [Rulepacks](docs/RULEPACKS.md) — merge semantics and schema resources for authoring prompt rules.
+- [Provider Policy](docs/PROVIDER_POLICY.md) — network and budget guardrails for adapters.
+- [Metrics](docs/METRICS.md) — Prometheus counters, histograms, and dashboard guidance.
+- [HF Adapter](docs/HF_ADAPTER.md) — error handling, retry, and budget enforcement design.
 
 ## Development Setup (Local-First)
 
