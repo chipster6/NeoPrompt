@@ -1,0 +1,13 @@
+name: pack.chatgpt.v1
+match:
+  model:
+    - gpt-3.5*
+    - gpt-4*
+directives:
+  temperature: 0.7
+  json_mode: false
+operators:
+  include:
+    - apply_examples
+  insert_at:
+    apply_examples: before:apply_quality_bar

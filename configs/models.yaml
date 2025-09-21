@@ -1,0 +1,34 @@
+providers:
+  default: hf
+  registry:
+    hf:
+      base_url_env: HF_BASE
+      token_env: HF_TOKEN
+      allowlist_env: EGRESS_ALLOWLIST
+
+models:
+  - id: mistralai/Mistral-7B-Instruct
+    provider: hf
+    params:
+      temperature: 0.2
+      max_tokens: 1024
+      stop: null
+      json_mode: false
+    cost_hints:
+      unit: tok
+      input_per_1k: 0.0
+      output_per_1k: 0.0
+      budget_tokens: 0
+
+  - id: Qwen/Qwen2.5-7B-Instruct
+    provider: hf
+    params:
+      temperature: 0.2
+      max_tokens: 1024
+      stop: null
+      json_mode: false
+    cost_hints:
+      unit: tok
+      input_per_1k: 0.0
+      output_per_1k: 0.0
+      budget_tokens: 0

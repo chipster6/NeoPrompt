@@ -1,0 +1,22 @@
+name: pack.precision.v2
+match:
+  category:
+    - precision
+    - coding
+directives:
+  sections:
+    constraints:
+      - Avoid hallucinations
+  max_tokens: 2048
+  examples_count: 3
+  json_mode: true
+operators:
+  include:
+    - apply_io_format
+    - apply_quality_bar
+  exclude:
+    - apply_examples
+  insert_at:
+    apply_role_hdr: start
+    apply_io_format: before:apply_quality_bar
+    apply_quality_bar: end

@@ -64,6 +64,40 @@ RECIPES_ERROR_COUNT = Gauge(
     "Current count of recipe validation errors",
 )
 
+# -----------------------------
+# Engine API metrics (M1)
+# -----------------------------
+from prometheus_client import Counter as _Counter, Histogram as _Histogram
+
+neopr_engine_requests_total = _Counter(
+    "neopr_engine_requests_total",
+    "Total Engine API requests",
+    labelnames=("endpoint",),
+)
+
+neopr_engine_latency_seconds = _Histogram(
+    "neopr_engine_latency_seconds",
+    "Engine API latency in seconds",
+    labelnames=("endpoint",),
+)
+
+# -----------------------------
+# HF provider metrics (M1)
+# -----------------------------
+neopr_hf_backoffs_total = _Counter(
+    "neopr_hf_backoffs_total",
+    "Total number of HF backoff events",
+)
+
+neopr_hf_rate_limited_total = _Counter(
+    "neopr_hf_rate_limited_total",
+    "Total number of HF 429 rate limited responses",
+)
+
+# Pre-register metrics so names appear even if zero
+neopr_hf_backoffs_total.inc(0)
+neopr_hf_rate_limited_total.inc(0)
+
 def set_epsilon_gauge(epsilon: float) -> None:
     try:
         BANDIT_EPSILON.set(float(epsilon))

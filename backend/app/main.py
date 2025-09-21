@@ -31,6 +31,7 @@ from .guardrails import apply_domain_caps, sanitize_text
 from . import metrics  # ensure metrics is imported for endpoints that reference it
 from .bandit import BanditService, BanditConfig
 from .logging_config import configure_logging
+from .routes.engine import router as engine_router
 
 # Phase B: allow PROMPT_TEMPLATES_DIR to override RECIPES_DIR; default to repo prompt-templates directory.
 _DEFAULT_PROMPT_TEMPLATES_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), "../../prompt-templates"))
@@ -82,6 +83,9 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+# Mount new Engine API routes (/engine/*)
+app.include_router(engine_router)
 
 # Health check endpoint for container and proxy health
 @app.get("/healthz")
