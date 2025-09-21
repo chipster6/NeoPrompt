@@ -1,3 +1,5 @@
+> NOTE: LEGACY ADR — This ADR applies to v1 “recipes”. V2 uses PromptDoc + RulePacks and /engine/* endpoints. See NeoPrompt_TechSpecV2.md and docs/rulepacks_authoring.md.
+
 # ADR 0001 — Schema and Validation Track for NeoPrompt Recipes
 
 Status: Accepted
@@ -23,7 +25,8 @@ Decision
   - Modes: VALIDATION_STRICT excludes semantic violations for critical categories (initially: law)
 - Diagnostics:
   - Collect errors/warnings with error_type (yaml_parse|schema_validation|semantic_validation), file_path, line_number (when available), and severity (error|warning)
-  - Expose via /recipes and a dedicated /diagnostics endpoint
+- Expose via /recipes and a dedicated /diagnostics endpoint (Legacy v1)
+- V2: expose /engine/plan, /engine/transform, and /diagnostics for engine validations
 - Tooling:
   - JSON Schema exposed via /recipe_schema for editor integration
   - Basic CLI for validate (single-shot; watch later)

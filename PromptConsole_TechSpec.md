@@ -1,3 +1,5 @@
+> NOTE: DEPRECATED — superseded by V2. See NeoPrompt_TechSpecV2.md for the current spec. This document describes legacy v1 and is retained for reference.
+
 # Personal Prompt Engineering Console — Technical Specification
 
 **Status:** Draft v1 (personal, single-user)  

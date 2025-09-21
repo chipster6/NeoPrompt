@@ -1,3 +1,5 @@
+> NOTE: DEPRECATED — legacy v1 recipe coverage. RulePacks coverage coming in V2.
+
 # Recipe Library Coverage
 
 Total recipes: **22**

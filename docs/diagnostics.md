@@ -1,38 +1,42 @@
-# Diagnostics — NeoPrompt Recipe Validation
+# Diagnostics — Engine Validation (V2)
 
-This document defines the diagnostics taxonomy and semantics used by the recipes loader/validator.
+This document describes diagnostics for the V2 engine: PromptDoc IR, RulePacks resolution/merge, and template/runtime validations.
 
 Fields
 - file_path: absolute or project-relative path
 - error: human-readable message
-- line_number: 1-based line when available (YAML parsing)
-- error_type: yaml_parse | schema_validation | semantic_validation | io_error
+- line_number: 1-based when available
+- error_type: json_parse | schema_validation | semantic_validation | io_error | assist_json_invalid | egress_blocked
 - severity: error | warning
 
 Codes and guidance
-- yaml_parse (error)
-  - Meaning: YAML could not be parsed; file is ignored.
-  - Typical causes: missing closing bracket, invalid indentation.
+- json_parse (error)
+  - Meaning: JSON (or JSON-in-Markdown) could not be parsed; payload or config ignored.
   - Action: Fix syntax. Line number provided when possible.
 - schema_validation (error)
-  - Meaning: YAML parsed but does not conform to the Recipe model (missing required fields, wrong types).
-  - Action: Align with schema. See /recipe_schema or docs/recipe.schema.json for reference.
+  - Meaning: Payload/config parsed but does not conform to the PromptDoc or RulePack schema.
+  - Action: Align with schemas (see docs/promptdoc.schema.json, docs/rulepack.schema.json).
 - semantic_validation (warning)
-  - Meaning: Recipe violates domain guidance (e.g., law requires guards.max_temperature ≤ 0.3) or uses unknown enums.
-  - Action: Adjust values or rename fields. In VALIDATION_STRICT mode, certain categories (e.g., law) are excluded on semantic violations.
+  - Meaning: Violates domain guidance or unknown enums.
+  - Action: Adjust values or rename fields. In STRICT mode, certain violations may be rejected.
+- assist_json_invalid (error)
+  - Meaning: LLM Assist (Editor/Critic) returned non‑JSON or invalid JSON for strict JSON I/O operators.
+  - Action: Inspect operator trace; retry or disable assist; ensure models are configured.
+- egress_blocked (error)
+  - Meaning: Remote call blocked by NO_NET_MODE or provider/egress allowlist.
+  - Action: Verify .env profile and EGRESS/PROVIDER allowlists.
 - io_error (error)
-  - Meaning: File access issue.
-  - Action: Check permissions/path validity.
+  - Meaning: File/network access issue.
+  - Action: Check permissions/path/policy.
 
 Severity policy
-- yaml_parse, schema_validation, io_error → error
-- semantic_validation → warning (except excluded from selection under VALIDATION_STRICT for critical categories)
+- json_parse, schema_validation, assist_json_invalid, egress_blocked, io_error → error
+- semantic_validation → warning (unless STRICT mode enforces rejection)
 
-Surface
-- GET /recipes returns both recipes and diagnostics (errors array)
-- GET /diagnostics returns diagnostics only
-- CLI: backend/cli/recipes_validate.py prints diagnostics in text or JSON
+Surfaces
+- GET /engine/plan returns packs_applied and operator_plan (+ warnings)
+- POST /engine/transform returns quality, operator_trace, and errors array on failures
+- GET /diagnostics returns aggregated diagnostics
 
-Future extensions
-- error codes per rule (e.g., NP1001: MISSING_FIELD, NP2003: MAX_TEMPERATURE_EXCEEDED)
-- Related locations for cross-file rules (includes/extends)
+See also: NeoPrompt_TechSpecV2.md (Sections: Configuration, Error Model).
+
