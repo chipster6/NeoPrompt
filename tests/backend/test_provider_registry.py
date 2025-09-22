@@ -31,3 +31,15 @@ def test_get_llm_provider_returns_provider_without_network(monkeypatch):
 def test_unknown_model_falls_back_to_default_provider():
     p = get_llm_provider("some/unknown-model")
     assert isinstance(p, HFProvider)
+
+
+def test_overrides_are_applied_to_provider_instance():
+    # Provide custom base_url and token; provider constructor should receive them
+    p = get_llm_provider(
+        "mistralai/Mistral-7B-Instruct",
+        base_url="https://example.org",
+        token="abc123",
+    )
+    assert isinstance(p, HFProvider)
+    assert getattr(p, "base_url", "").startswith("https://example.org")
+    assert getattr(p, "token", "") == "abc123"
