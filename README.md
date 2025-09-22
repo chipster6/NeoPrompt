@@ -47,6 +47,15 @@ mise install
 mise trust .mise.toml
 ```
 
+### Docker Compose (local HF prep)
+
+To exercise the API in a container using the Hugging Face-ready profile (HF assist stays disabled in M1):
+
+1. Copy the default environment file if you have not already: `cp .env.example .env.local-hf` and adjust values as needed. Leave any `HF_*` tokens empty to avoid outbound Hugging Face calls.
+2. From the repo root, build and start the container: `docker compose -f infra/compose/docker-compose.local-hf.yml up --build`.
+
+The profile only launches the API service on port 8000 using `.env.local-hf`, so without credentials it runs completely offline.
+
 ### Backend
 ```bash
 cd backend
