@@ -48,6 +48,25 @@ jobs:
           pip install -e sdk/python/neoprompt
           pytest -q tests/sdk_python
 
+      - name: Run RulePacks tests (JUnit)
+        env:
+          PYTHONPATH: ${{ github.workspace }}
+          MYPYPATH: ${{ github.workspace }}
+        run: |
+          mkdir -p reports/rulepacks
+          pytest -q tests/rulepacks --junitxml=reports/rulepacks/junit.xml || true
+
+      - name: Gate B — enforce pass-rate ≥95% and >0 tests
+        run: |
+          python3 scripts/enforce_rulepacks_gate.py
+
+      - name: Upload RulePacks JUnit report
+        if: always()
+        uses: actions/upload-artifact@v3
+        with:
+          name: junit-rulepacks
+          path: reports/rulepacks/junit.xml
+
       - name: Set up Node 22
         uses: actions/setup-node@v4
         with:

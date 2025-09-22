@@ -2,7 +2,7 @@ from __future__ import annotations
 import glob
 import os
 import re
-from typing import Any, Dict, List
+from typing import Any, Dict, List, Tuple, Iterable, Hashable
 
 import yaml
 
@@ -10,8 +10,12 @@ from backend.app.engine_ir.planner.plan import build_operator_plan
 
 
 # Prefer project-root relative path for rulepacks
-RULEPACKS_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), "../../../../configs/rulepacks"))
+RULEPACKS_DIR = os.path.abspath(
+    os.path.join(os.path.dirname(__file__), "../../../../configs/rulepacks")
+)
 
+
+# -------------------- Generic helpers --------------------
 
 def _as_list(x: Any) -> List[Any]:
     if x is None:
@@ -21,26 +25,43 @@ def _as_list(x: Any) -> List[Any]:
     return [x]
 
 
+def _freeze(x: Any) -> Hashable:
+    if isinstance(x, dict):
+        return tuple(sorted((k, _freeze(v)) for k, v in x.items()))
+    if isinstance(x, list):
+        return tuple(_freeze(v) for v in x)
+    return x  # assumes hashable scalars
+
+
 def _append_unique(a: List[Any], b: List[Any]) -> List[Any]:
-    seen = set(a)
+    seen = {_freeze(x) for x in a}
     out = list(a)
     for x in b:
-        if x not in seen:
-            seen.add(x)
+        fx = _freeze(x)
+        if fx not in seen:
+            seen.add(fx)
             out.append(x)
     return out
 
 
-def _merge_numbers(key: str, a: float | int | None, b: float | int | None) -> float | int | None:
+def _is_override_wrapper(v: Any) -> bool:
+    return isinstance(v, dict) and bool(v.get("override")) and "value" in v
+
+
+def _unwrap_override(v: Any) -> Any:
+    return v.get("value") if isinstance(v, dict) else v
+
+
+def _merge_numbers_by_key(key: str, a: float | int | None, b: float | int | None) -> float | int | None:
     if a is None:
         return b
     if b is None:
         return a
-    key_lower = key.lower()
-    # min for limits, max for richness
-    if key_lower.startswith("max_") or key_lower.endswith("_limit") or key_lower.endswith("_limits") or key_lower.endswith("_budget"):
+    k = (key or "").lower()
+    # Limits → take minimum; Richness → take maximum
+    if k.startswith("max_") or k.endswith("_limit") or k.endswith("_limits") or k.endswith("_budget"):
         return min(a, b)
-    if key_lower.startswith("min_") or key_lower.endswith("_count") or key_lower.endswith("_richness") or key_lower.endswith("_depth"):
+    if k.startswith("min_") or k.endswith("_count") or k.endswith("_richness") or k.endswith("_depth"):
         return max(a, b)
     try:
         return max(a, b)
@@ -48,41 +69,86 @@ def _merge_numbers(key: str, a: float | int | None, b: float | int | None) -> fl
         return b
 
 
-def _merge(a: Any, b: Any, key: str | None = None) -> Any:
-    # List override form: {"override": true, "value": [...]}
-    if isinstance(a, dict) and "override" in a and "value" in a and isinstance(b, (list, dict)):
-        return b if isinstance(b, list) else b.get("value", [])
-    if isinstance(b, dict) and "override" in b and "value" in b:
-        return b.get("value", [])
+def _merge_values(a: Any, b: Any, key_path: Tuple[str, ...]) -> Any:
+    # Normalize override wrappers on both sides for list contexts
+    if _is_override_wrapper(a):
+        a = _unwrap_override(a)
+    if _is_override_wrapper(b):
+        # Incoming override wins
+        return _unwrap_override(b)
 
+    # Dicts
     if isinstance(a, dict) and isinstance(b, dict):
-        out = dict(a)
-        for k, v in b.items():
+        out: Dict[str, Any] = dict(a)
+        # Deterministic traversal by key
+        for k in sorted(b.keys()):
             if k in out:
-                out[k] = _merge(out[k], v, k)
+                out[k] = _merge_values(out[k], b[k], key_path + (k,))
             else:
-                out[k] = v
+                out[k] = b[k]
         return out
 
+    # Lists → append-unique
     if isinstance(a, list) and isinstance(b, list):
         return _append_unique(a, b)
 
-    if isinstance(a, (int, float)) and isinstance(b, (int, float)) and key:
-        return _merge_numbers(key, a, b)
+    # Booleans → last-writer wins (must be checked before numbers since bool is int)
+    if isinstance(a, bool) and isinstance(b, bool):
+        return b
 
+    # Numbers → key-based min/max, excluding bools
+    if isinstance(a, (int, float)) and not isinstance(a, bool) and isinstance(b, (int, float)) and not isinstance(b, bool):
+        key = key_path[-1] if key_path else ""
+        return _merge_numbers_by_key(key, a, b)
+
+    # Fallback → incoming wins (last-writer)
     return b
 
 
-def load_rulepacks() -> List[Dict[str, Any]]:
-    files = sorted(glob.glob(os.path.join(RULEPACKS_DIR, "*.yaml")))
+# -------------------- Packs I/O --------------------
+
+def load_packs(paths: List[str]) -> List[Dict[str, Any]]:
+    """Load RulePacks from the given directories/files.
+
+    - Accepts directories (non-recursive) and/or explicit files
+    - Includes both .yaml and .yml
+    - Deterministic ordering by (absdir, filename)
+    - Adds _file basename to each loaded pack for traceability
+    """
+    files: List[str] = []
+    for p in paths or []:
+        try:
+            if os.path.isdir(p):
+                files.extend(glob.glob(os.path.join(p, "*.yaml")))
+                files.extend(glob.glob(os.path.join(p, "*.yml")))
+            elif os.path.isfile(p):
+                files.append(p)
+        except Exception:
+            continue
+    # Deduplicate and sort deterministically
+    files = sorted(set(files), key=lambda f: (os.path.abspath(os.path.dirname(f)), os.path.basename(f)))
+
     packs: List[Dict[str, Any]] = []
     for f in files:
-        with open(f, "r", encoding="utf-8") as fh:
-            data = yaml.safe_load(fh) or {}
+        try:
+            with open(f, "r", encoding="utf-8") as fh:
+                data = yaml.safe_load(fh) or {}
+            if not isinstance(data, dict):
+                data = {}
             data["_file"] = os.path.basename(f)
             packs.append(data)
+        except Exception:
+            # Skip unreadable/invalid files to keep loader robust
+            continue
     return packs
 
+
+def load_rulepacks() -> List[Dict[str, Any]]:
+    """Legacy wrapper that loads from the default RulePacks directory."""
+    return load_packs([RULEPACKS_DIR])
+
+
+# -------------------- Matching --------------------
 
 def _match(value: str | None, patterns: List[str] | None) -> bool:
     if not patterns:
@@ -101,46 +167,96 @@ def _match(value: str | None, patterns: List[str] | None) -> bool:
     return False
 
 
-def resolve(model: str | None, category: str | None) -> Dict[str, Any]:
-    packs = load_rulepacks()
-    merged: Dict[str, Any] = {}
-    packs_applied: List[str] = []
-    op_include: List[str] = []
-    op_exclude: List[str] = []
-    op_insert_at: Dict[str, Any] = {}
+# -------------------- Merge packs --------------------
+
+def merge_packs(packs: List[Dict[str, Any]]) -> Dict[str, Any]:
+    """Merge a sequence of RulePacks into a single config according to policy.
+
+    - Lists: append-unique unless incoming uses {override: true, value: [...]}
+    - Numbers: min for limits (max_*, *_limit/_limits/_budget), max for richness (min_*, *_count/_richness/_depth), fallback max
+    - Booleans: last-writer wins
+    - Dicts: deep-merge deterministically
+    - Operators: (baseline ∪ include) − exclude with insert_at positioning (unknown anchors degrade deterministically)
+    """
+    merged_directives: Dict[str, Any] = {}
     baseline_ops: List[str] = []
+    include_ops: List[str] = []
+    exclude_ops: List[str] = []
+    insert_at: Dict[str, Any] = {}
 
-    for p in packs:
-        match = p.get("match", {}) or {}
-        m_ok = _match(model, _as_list(match.get("model"))) and _match(category, _as_list(match.get("category")))
-        if not m_ok:
-            continue
-        packs_applied.append(p.get("name") or p.get("_file"))
-
-        directives = p.get("directives", {}) or {}
-        merged = _merge(merged, directives)
-
+    # Merge directives and collect operator directives
+    for p in packs or []:
+        # directives
+        d = p.get("directives", {}) or {}
+        if isinstance(d, dict):
+            merged_directives = _merge_values(merged_directives, d, ("directives",))
+        # operators collection
         ops = p.get("operators", {}) or {}
-        if not baseline_ops:
-            baseline_ops = list(ops.get("baseline", []) or [])
-        op_include = _append_unique(op_include, _as_list(ops.get("include")))
-        op_exclude = _append_unique(op_exclude, _as_list(ops.get("exclude")))
+        if not baseline_ops and isinstance(ops.get("baseline"), list):
+            baseline_ops = list(ops.get("baseline") or [])
+        include_ops = _append_unique(include_ops, _as_list(ops.get("include")))
+        exclude_ops = _append_unique(exclude_ops, _as_list(ops.get("exclude")))
         ins = ops.get("insert_at", {}) or {}
-        op_insert_at.update({k: ins[k] for k in sorted(ins.keys())})
+        if isinstance(ins, dict):
+            # last-writer wins per key (stable: apply in sorted key order when planning)
+            for k in sorted(ins.keys()):
+                insert_at[k] = ins[k]
 
     operator_directives = {
         "operators": {
-            "include": op_include,
-            "exclude": op_exclude,
-            "insert_at": op_insert_at,
+            "include": include_ops,
+            "exclude": exclude_ops,
+            "insert_at": insert_at,
         }
     }
     operator_plan = build_operator_plan(operator_directives, baseline_ops)
 
+    return {
+        "directives": merged_directives,
+        "operators": {
+            "baseline": baseline_ops,
+            "include": include_ops,
+            "exclude": exclude_ops,
+            "insert_at": insert_at,
+            "plan": operator_plan,
+        },
+    }
+
+
+# -------------------- Resolve API (back-compat) --------------------
+
+def resolve(model: str | None, category: str | None) -> Dict[str, Any]:
+    packs = load_rulepacks()
+
+    # Filter by match rules, preserving deterministic order
+    matched: List[Dict[str, Any]] = []
+    packs_applied: List[str] = []
+    for p in packs:
+        match = p.get("match", {}) or {}
+        m_ok = _match(model, _as_list(match.get("model"))) and _match(
+            category, _as_list(match.get("category"))
+        )
+        if not m_ok:
+            continue
+        matched.append(p)
+        packs_applied.append(p.get("name") or p.get("_file"))
+
+    merged = merge_packs(matched)
+    ops = merged.get("operators", {}) or {}
+
+    # Preserve previous resolve() contract
+    operator_directives = {
+        "operators": {
+            "include": list(ops.get("include", []) or []),
+            "exclude": list(ops.get("exclude", []) or []),
+            "insert_at": dict(ops.get("insert_at", {}) or {}),
+        }
+    }
+
     result = {
         "packs_applied": packs_applied,
-        "directives": merged | operator_directives,
-        "baseline_ops": baseline_ops,
-        "operator_plan": operator_plan,
+        "directives": (merged.get("directives", {}) or {}) | operator_directives,
+        "baseline_ops": list(ops.get("baseline", []) or []),
+        "operator_plan": list(ops.get("plan", []) or []),
     }
     return result
