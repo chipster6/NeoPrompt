@@ -79,6 +79,19 @@ neopr_engine_latency_seconds = _Histogram(
     "neopr_engine_latency_seconds",
     "Engine API latency in seconds",
     labelnames=("endpoint",),
+    buckets=(
+        0.005,
+        0.01,
+        0.025,
+        0.05,
+        0.1,
+        0.25,
+        0.5,
+        1.0,
+        2.5,
+        5.0,
+        10.0,
+    ),
 )
 
 # -----------------------------
@@ -97,6 +110,11 @@ neopr_hf_rate_limited_total = _Counter(
 # Pre-register metrics so names appear even if zero
 neopr_hf_backoffs_total.inc(0)
 neopr_hf_rate_limited_total.inc(0)
+
+# Pre-create labelled samples for engine endpoints so they appear in metrics output
+for _endpoint in ("plan", "score", "transform"):
+    neopr_engine_requests_total.labels(endpoint=_endpoint).inc(0)
+    neopr_engine_latency_seconds.labels(endpoint=_endpoint)
 
 def set_epsilon_gauge(epsilon: float) -> None:
     try:
