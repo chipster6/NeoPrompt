@@ -1,11 +1,13 @@
 from __future__ import annotations
-from functools import lru_cache
-from pathlib import Path
+
 import copy
 import os
+from functools import lru_cache
+from pathlib import Path
 from typing import Any, Dict
 
 import yaml
+from dotenv import dotenv_values
 
 from backend.app.adapters import providers as provider_registry
 
@@ -35,6 +37,46 @@ def reload_models_config() -> None:
 
 def get_models_config() -> Dict[str, Any]:
     return copy.deepcopy(_load_models_config())
+
+
+@lru_cache(maxsize=1)
+def _load_env_settings() -> Dict[str, str]:
+    """Load environment values from supported .env files."""
+
+    candidates: list[Path] = []
+    override = os.getenv("NEOPROMPT_ENV_FILE")
+    if override:
+        for part in override.split(os.pathsep):
+            if not part:
+                continue
+            candidate = Path(part).expanduser()
+            if candidate.is_dir():
+                candidate = candidate / ".env"
+            candidates.append(candidate)
+    else:
+        repo_root = Path(__file__).resolve().parents[2]
+        candidates = [
+            repo_root / ".env",
+            repo_root / ".env.local",
+            repo_root / ".env.local-hf",
+        ]
+
+    settings: Dict[str, str] = {}
+    for path in candidates:
+        try:
+            if not path.exists():
+                continue
+            values = dotenv_values(str(path))
+            for key, value in values.items():
+                if isinstance(value, (str, int, float)):
+                    settings[str(key)] = str(value)
+        except Exception:
+            continue
+    return settings
+
+
+def reload_env_settings() -> None:
+    _load_env_settings.cache_clear()
 
 
 def get_model_entry(model_id: str) -> Dict[str, Any]:
@@ -69,6 +111,7 @@ def get_llm_provider(
     """Instantiate the configured provider using the static models registry."""
     config = _load_models_config()
     providers_block = config.get("providers", {}) or {}
+    env_settings = _load_env_settings()
     resolved_provider = (provider_name or "").strip()
     if model_id:
         try:
@@ -88,19 +131,33 @@ def get_llm_provider(
 
     kwargs: Dict[str, Any] = {k: v for k, v in overrides.items() if v is not None}
 
+    def resolve_env(var_name: str | None) -> str | None:
+        if not var_name:
+            return None
+        existing = os.getenv(var_name)
+        if existing is not None:
+            return existing
+        value = env_settings.get(var_name)
+        if value is not None:
+            os.environ.setdefault(var_name, value)
+            return value
+        return None
+
     base_env = provider_settings.get("base_url_env")
     if "base_url" not in kwargs and base_env:
-        env_value = os.getenv(base_env)
+        env_value = resolve_env(base_env)
         if env_value:
             kwargs["base_url"] = env_value
 
     token_env = provider_settings.get("token_env")
     if "token" not in kwargs and token_env:
-        kwargs["token"] = os.getenv(token_env, "")
+        token_value = resolve_env(token_env)
+        if token_value is not None:
+            kwargs["token"] = token_value
 
     allow_env = provider_settings.get("allowlist_env")
     if allow_env:
-        allow_value = os.getenv(allow_env, "")
+        allow_value = resolve_env(allow_env)
         if allow_value:
             os.environ.setdefault("EGRESS_ALLOWLIST", allow_value)
 
