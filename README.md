@@ -15,6 +15,7 @@ A local middleware tool that transforms raw user requests into optimized, assist
 
 - [Operating Modes](docs/OPERATING_MODES.md) – how to run NeoPrompt in Local-Only or Local + HF configurations and what modes are planned next.
 - [Provider Policy](docs/PROVIDER_POLICY.md) – provider allowlists, enforcement points, and example Hugging Face calls with expected errors.
+- [Engine Offline API](docs/engine_endpoints.md) – /engine/plan, /engine/score, /engine/transform (deterministic, no network/LLM calls).
 
 ## Architecture
 
