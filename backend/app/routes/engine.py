@@ -47,7 +47,7 @@ class TransformResponse(BaseModel):
     hlep_text: str
 
 
-@router.post("/plan", response_model=PlanResponse)
+@router.post("/plan", response_model=PlanResponse, response_model_exclude_none=True)
 def engine_plan(req: PlanRequest) -> PlanResponse:
     start = perf_counter()
     try:
@@ -62,7 +62,7 @@ def engine_plan(req: PlanRequest) -> PlanResponse:
         neopr_engine_latency_seconds.labels(endpoint="plan").observe(perf_counter() - start)
 
 
-@router.post("/score", response_model=ScoreResponse)
+@router.post("/score", response_model=ScoreResponse, response_model_exclude_none=True)
 def engine_score(req: ScoreRequest) -> ScoreResponse:
     start = perf_counter()
     try:
@@ -82,7 +82,7 @@ def engine_score(req: ScoreRequest) -> ScoreResponse:
         neopr_engine_latency_seconds.labels(endpoint="score").observe(perf_counter() - start)
 
 
-@router.post("/transform", response_model=TransformResponse)
+@router.post("/transform", response_model=TransformResponse, response_model_exclude_none=True)
 def engine_transform(req: TransformRequest) -> TransformResponse:
     start = perf_counter()
     try:
