@@ -47,6 +47,13 @@ jobs:
           print(f"pass_rate={rate:.3f}")
           sys.exit(0 if rate>=0.95 else 2)
           PY
+      - name: Upload engine JUnit report
+        uses: actions/upload-artifact@v4
+        with:
+          name: engine-junit
+          path: reports/engine.junit.xml
+          if-no-files-found: warn
+          retention-days: 14
 
   track_rulepacks:
     name: Track B — RulePacks

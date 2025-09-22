@@ -2,9 +2,9 @@ from __future__ import annotations
 import glob
 import os
 import re
-from typing import Any, Dict, List, Tuple, Iterable, Hashable
+from typing import Any, Dict, List, Tuple, Hashable
 
-import yaml
+import yaml  # type: ignore[import-untyped]
 
 from backend.app.engine_ir.planner.plan import build_operator_plan
 
@@ -239,7 +239,11 @@ def resolve(model: str | None, category: str | None) -> Dict[str, Any]:
         if not m_ok:
             continue
         matched.append(p)
-        packs_applied.append(p.get("name") or p.get("_file"))
+        # Name is guaranteed to exist (_file injected) but narrow type for mypy
+        _nm = p.get("name")
+        _file = p.get("_file")
+        name: str = _nm if isinstance(_nm, str) and _nm else (_file if isinstance(_file, str) else "")
+        packs_applied.append(name)
 
     merged = merge_packs(matched)
     ops = merged.get("operators", {}) or {}
