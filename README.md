@@ -16,6 +16,7 @@ A local middleware tool that transforms raw user requests into optimized, assist
 - [Operating Modes](docs/OPERATING_MODES.md) – how to run NeoPrompt in Local-Only or Local + HF configurations and what modes are planned next.
 - [Provider Policy](docs/PROVIDER_POLICY.md) – provider allowlists, enforcement points, and example Hugging Face calls with expected errors.
 - [Engine Offline API](docs/engine_endpoints.md) – /engine/plan, /engine/score, /engine/transform (deterministic, no network/LLM calls).
+- Provider DI & models registry – see the section "Provider DI and models registry (Gate D2)" below and configs/models.yaml.
 
 ## Architecture
 
@@ -252,6 +253,48 @@ npm install
 npm run build
 node -e "import('./dist/index.js').then(async m => console.log(await new m.Client().health()))"
 ```
+
+## Provider DI and models registry (Gate D2)
+
+A lightweight DI module builds a provider registry from configs/models.yaml and environment variables in .env/.env.local-hf. Use it to obtain a provider instance for a model ID without making any network calls during construction.
+
+Usage
+
+```python
+from backend.app.deps import get_llm_provider
+
+# From models.yaml, this resolves to the configured provider key (default: hf)
+provider = get_llm_provider("mistralai/Mistral-7B-Instruct")
+
+# You can override base_url and token per call (handy for testing):
+provider = get_llm_provider(
+    "mistralai/Mistral-7B-Instruct",
+    base_url="https://api-inference.huggingface.co",
+    token="<optional-token>",
+)
+```
+
+models.yaml format (excerpt)
+
+```yaml
+providers:
+  default: hf
+  registry:
+    hf:
+      base_url_env: HF_BASE
+      token_env: HF_TOKEN
+
+models:
+  - id: mistralai/Mistral-7B-Instruct
+    provider: hf
+    params:
+      temperature: 0.2
+      max_tokens: 1024
+```
+
+- Providers block maps provider keys to environment variable names used at runtime.
+- Models block maps model IDs to provider keys and optional parameter defaults.
+- .env.local-hf overrides .env for local development.
 
 ## Milestones
 
